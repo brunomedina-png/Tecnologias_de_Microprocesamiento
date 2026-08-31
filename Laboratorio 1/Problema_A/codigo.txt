@@ -1,1 +1,85 @@
+; Problema A
 
+.include "m328pdef.inc"
+
+.org 0x0000
+    rjmp START
+
+START:
+    ; Configuro el stack
+    ldi r16, LOW(RAMEND)
+    out SPL, r16
+    ldi r16, HIGH(RAMEND)
+    out SPH, r16
+
+    ; Entradas: Puerto B (PB0 a PB3) con pull-up
+    clr r16
+    out DDRB, r16
+    ldi r16, 0x0F
+    out PORTB, r16
+
+    ; Salidas: Puerto D (LEDs) y Puerto C (Motor)
+    ser r16
+    out DDRD, r16
+    clr r16
+    out PORTD, r16
+
+    ldi r16, 0x03
+    out DDRC, r16
+    clr r16
+    out PORTC, r16
+
+    ; Registro r17 guarda el modo: 0=Ligera, 1=Media, 2=Pesada
+    clr r17
+    sbi PORTD, 5        ; Arranca en carga ligera
+
+MAIN:
+    sbi PORTD, 0        ; Prender led de Listo
+
+    ; Reviso si tocaron cambio de carga (PB1)
+    sbis PINB, 1
+    rjmp CAMBIO_CARGA
+
+    rjmp MAIN
+
+CAMBIO_CARGA:
+    rcall DELAY_BOTON
+
+    ; Aumento el contador de carga
+    inc r17
+    cpi r17, 3
+    brne ACTUALIZAR_LEDS
+    clr r17             ; Si pasa de 2 vuelve a 0
+
+ACTUALIZAR_LEDS:
+    ; Apago los leds de carga
+    cbi PORTD, 5
+    cbi PORTD, 6
+    cbi PORTD, 7
+
+    ; Prendo el que toca
+    cpi r17, 0
+    breq LED_LIGERA
+    cpi r17, 1
+    breq LED_MEDIA
+
+    sbi PORTD, 7        ; Pesada
+    rjmp MAIN
+
+LED_LIGERA:
+    sbi PORTD, 5
+    rjmp MAIN
+
+LED_MEDIA:
+    sbi PORTD, 6
+    rjmp MAIN
+
+; Retardo sencillo
+DELAY_BOTON:
+    ldi r18, 100
+D1: ldi r19, 200
+D2: dec r19
+    brne D2
+    dec r18
+    brne D1
+    ret
