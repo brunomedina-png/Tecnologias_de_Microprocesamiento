@@ -1,24 +1,24 @@
-; Problema A
+;Problema A
 
 .include "m328pdef.inc"
 
 .org 0x0000
-    rjmp START
+    rjmp INICIO
 
-START:
-    ; Configuro el stack
+INICIO:
+    ; Configuro la pila
     ldi r16, LOW(RAMEND)
     out SPL, r16
     ldi r16, HIGH(RAMEND)
     out SPH, r16
 
-    ; Entradas: Puerto B (PB0 a PB3) con pull-up
+    ; Configuro entradas (Puerto B) y activo pull-ups
     clr r16
     out DDRB, r16
     ldi r16, 0x0F
     out PORTB, r16
 
-    ; Salidas: Puerto D (LEDs) y Puerto C (Motor)
+    ; Configuro salidas: LEDs en PD y Control de Motor en PC
     ser r16
     out DDRD, r16
     clr r16
@@ -29,57 +29,128 @@ START:
     clr r16
     out PORTC, r16
 
-    ; Registro r17 guarda el modo: 0=Ligera, 1=Media, 2=Pesada
+    ; r17 controla el modo de carga
     clr r17
     sbi PORTD, 5        ; Arranca en carga ligera
 
-MAIN:
-    sbi PORTD, 0        ; Prender led de Listo
+ESPERAR_ACCION:
+    sbi PORTD, 0        ; Prender LED "Listo"
 
-    ; Reviso si tocaron cambio de carga (PB1)
+    ; Lectura del boton de carga (PB1)
     sbis PINB, 1
-    rjmp CAMBIO_CARGA
+    rjmp BOTON_CARGA
 
-    rjmp MAIN
+    ; Lectura del boton de inicio (PB0)
+    sbis PINB, 0
+    rjmp BOTON_INICIO
 
-CAMBIO_CARGA:
-    rcall DELAY_BOTON
+    rjmp ESPERAR_ACCION
 
-    ; Aumento el contador de carga
+; Rutina para rotar tipos de carga
+BOTON_CARGA:
+    rcall ESPERA_CORTA
+
+; Bucle para esperar a que suelten el boton
+ESPERA_SOLTAR_CARGA:
+    sbis PINB, 1
+    rjmp ESPERA_SOLTAR_CARGA
+
     inc r17
     cpi r17, 3
-    brne ACTUALIZAR_LEDS
-    clr r17             ; Si pasa de 2 vuelve a 0
+    brne MOSTRAR_SELECCION
+    clr r17
 
-ACTUALIZAR_LEDS:
-    ; Apago los leds de carga
+MOSTRAR_SELECCION:
+    ; Apago indicadores de carga
     cbi PORTD, 5
     cbi PORTD, 6
     cbi PORTD, 7
 
-    ; Prendo el que toca
     cpi r17, 0
-    breq LED_LIGERA
+    breq MODO_LIGERO
     cpi r17, 1
-    breq LED_MEDIA
+    breq MODO_MEDIO
 
-    sbi PORTD, 7        ; Pesada
-    rjmp MAIN
+    sbi PORTD, 7        ; Carga Pesada
+    rjmp ESPERAR_ACCION
 
-LED_LIGERA:
+MODO_LIGERO:
     sbi PORTD, 5
-    rjmp MAIN
+    rjmp ESPERAR_ACCION
 
-LED_MEDIA:
+MODO_MEDIO:
     sbi PORTD, 6
-    rjmp MAIN
+    rjmp ESPERAR_ACCION
 
-; Retardo sencillo
-DELAY_BOTON:
-    ldi r18, 100
-D1: ldi r19, 200
-D2: dec r19
-    brne D2
+; Revision de switches antes de arrancar
+BOTON_INICIO:
+    rcall ESPERA_CORTA
+
+ESPERA_SOLTAR_INICIO:
+    sbis PINB, 0
+    rjmp ESPERA_SOLTAR_INICIO
+
+    ; Compruebo puerta (PB2) y sensor de agua (PB3)
+    sbic PINB, 2
+    rjmp ESPERAR_ACCION
+    sbic PINB, 3
+    rjmp ESPERAR_ACCION
+
+    cbi PORTD, 0        ; Apagar "Listo"
+
+; Ejecución del ciclo
+CICLO_LAVADO:
+    sbi PORTD, 1        ; LED Lavado
+    sbi PORTC, 0        ; Motor derecha
+    rcall ESPERA_LARGA
+    cbi PORTC, 0
+    cbi PORTD, 1
+
+CICLO_CENTRIFUGADO:
+    sbi PORTD, 2        ; LED Centrifugado
+    sbi PORTC, 0        ; Motor derecha
+    rcall ESPERA_LARGA
+    cbi PORTC, 0
+    cbi PORTD, 2
+
+CICLO_SECADO:
+    sbi PORTD, 3        ; LED Secado
+    sbi PORTC, 0        ; Giro derecha
+    rcall ESPERA_LARGA
+    cbi PORTC, 0
+    rcall ESPERA_CORTA
+    sbi PORTC, 1        ; Giro izquierda
+    rcall ESPERA_LARGA
+    cbi PORTC, 1
+    cbi PORTD, 3
+
+CICLO_FIN:
+    sbi PORTD, 4        ; LED Fin
+    rcall ESPERA_LARGA
+    cbi PORTD, 4
+    rjmp ESPERAR_ACCION
+
+; Subrutinas de tiempo
+ESPERA_CORTA:
+    ldi r18, 50
+T1: ldi r19, 200
+T2: ldi r20, 100
+T3: dec r20
+    brne T3
+    dec r19
+    brne T2
     dec r18
-    brne D1
+    brne T1
+    ret
+
+ESPERA_LARGA:
+    ldi r18, 250
+TL1: ldi r19, 250
+TL2: ldi r20, 100
+TL3: dec r20
+    brne TL3
+    dec r19
+    brne TL2
+    dec r18
+    brne TL1
     ret
