@@ -1,4 +1,4 @@
-;Problema A
+; Problema A
 
 .include "m328pdef.inc"
 
@@ -6,148 +6,302 @@
     rjmp INICIO
 
 INICIO:
-    ; Configuro la pila
+    ; Configuro la pila (necesario para usar rcall y ret)
     ldi r16, LOW(RAMEND)
     out SPL, r16
     ldi r16, HIGH(RAMEND)
     out SPH, r16
 
-    ; Configuro entradas (Puerto B) y activo pull-ups
+    ; Configuro el Puerto B como entrada para los botones y sensores
+    ; PB0 = Inicio, PB1 = Carga, PB2 = Puerta, PB3 = Agua
     clr r16
     out DDRB, r16
     ldi r16, 0x0F
-    out PORTB, r16
+    out PORTB, r16       ; Activo las resistencias Pull-Up internas (se activan enviando a GND/0V)
 
-    ; Configuro salidas: LEDs en PD y Control de Motor en PC
+    ; Configuro el Puerto D como salida para los LEDs
     ser r16
-    out DDRD, r16
+    out DDRD, r16        ; Todo el puerto D es salida
     clr r16
-    out PORTD, r16
+    out PORTD, r16       ; Empiezo con todos los LEDs apagados
 
+    ; Configuro el Puerto C como salida para el motor
+    ; PC0 = Giro Derecha, PC1 = Giro Izquierda
     ldi r16, 0x03
     out DDRC, r16
     clr r16
-    out PORTC, r16
+    out PORTC, r16       ; Motores apagados
 
-    ; r17 controla el modo de carga
+    ; Variable para guardar el tipo de carga:
+    ; r17 = 0 (Ligera), r17 = 1 (Media), r17 = 2 (Pesada)
     clr r17
-    sbi PORTD, 5        ; Arranca en carga ligera
+    sbi PORTD, 5         ; Prendo el LED de Carga Ligera (PD5)
 
-ESPERAR_ACCION:
-    sbi PORTD, 0        ; Prender LED "Listo"
+ESPERAR:
+    sbi PORTD, 0         ; Prendo el LED "Listo" (PD0)
 
-    ; Lectura del boton de carga (PB1)
+    ; Pregunto si apretaron el botón de carga (PB1)
     sbis PINB, 1
-    rjmp BOTON_CARGA
+    rjmp CAMBIAR_CARGA
 
-    ; Lectura del boton de inicio (PB0)
+    ; Pregunto si apretaron el botón de inicio (PB0)
     sbis PINB, 0
-    rjmp BOTON_INICIO
+    rjmp PROBAR_INICIO
 
-    rjmp ESPERAR_ACCION
+    rjmp ESPERAR
 
-; Rutina para rotar tipos de carga
-BOTON_CARGA:
-    rcall ESPERA_CORTA
 
-; Bucle para esperar a que suelten el boton
+CAMBIAR_CARGA:
+    rcall RETARDO_50MS   ; Antirrebote pequeño
+
 ESPERA_SOLTAR_CARGA:
-    sbis PINB, 1
+    sbis PINB, 1         ; Esperamos a que suelten el botón
     rjmp ESPERA_SOLTAR_CARGA
 
-    inc r17
-    cpi r17, 3
-    brne MOSTRAR_SELECCION
+    inc r17              ; Sumamos 1 al modo de carga
+    cpi r17, 3           ; Si llega a 3, volvemos a 0
+    brne ACTUALIZAR_LEDS_CARGA
     clr r17
 
-MOSTRAR_SELECCION:
-    ; Apago indicadores de carga
+ACTUALIZAR_LEDS_CARGA:
+    ; Apago los tres LEDs de carga primero
     cbi PORTD, 5
     cbi PORTD, 6
     cbi PORTD, 7
 
+    ; Reviso qué modo está seleccionado para prender su LED
     cpi r17, 0
-    breq MODO_LIGERO
+    breq ES_LIGERA
     cpi r17, 1
-    breq MODO_MEDIO
+    breq ES_MEDIA
 
-    sbi PORTD, 7        ; Carga Pesada
-    rjmp ESPERAR_ACCION
+    sbi PORTD, 7         ; Es carga Pesada (PD7)
+    rjmp ESPERAR
 
-MODO_LIGERO:
-    sbi PORTD, 5
-    rjmp ESPERAR_ACCION
+ES_LIGERA:
+    sbi PORTD, 5         ; Es carga Ligera (PD5)
+    rjmp ESPERAR
 
-MODO_MEDIO:
-    sbi PORTD, 6
-    rjmp ESPERAR_ACCION
+ES_MEDIA:
+    sbi PORTD, 6         ; Es carga Media (PD6)
+    rjmp ESPERAR
 
-; Revision de switches antes de arrancar
-BOTON_INICIO:
-    rcall ESPERA_CORTA
+PROBAR_INICIO:
+    rcall RETARDO_50MS   ; Antirrebote
 
 ESPERA_SOLTAR_INICIO:
-    sbis PINB, 0
+    sbis PINB, 0         ; Esperamos a que suelten el botón de inicio
     rjmp ESPERA_SOLTAR_INICIO
 
-    ; Compruebo puerta (PB2) y sensor de agua (PB3)
+    ; Reviso si la puerta está abierta (PB2 tiene un 1)
     sbic PINB, 2
-    rjmp ESPERAR_ACCION
+    rjmp ESPERAR
+
+    ; Reviso si falta agua (PB3 tiene un 1)
     sbic PINB, 3
-    rjmp ESPERAR_ACCION
+    rjmp ESPERAR
 
-    cbi PORTD, 0        ; Apagar "Listo"
+    ; Si la puerta está cerrada y hay agua, apago LED "Listo" y arranco
+    cbi PORTD, 0
 
-; Ejecución del ciclo
-CICLO_LAVADO:
-    sbi PORTD, 1        ; LED Lavado
-    sbi PORTC, 0        ; Motor derecha
-    rcall ESPERA_LARGA
-    cbi PORTC, 0
-    cbi PORTD, 1
+ETAPA_LAVADO:
+    sbi PORTD, 1         ; Prendo LED Lavado (PD1)
+    ldi r25, 5           ; Contador para repetir 5 veces el ciclo
 
-CICLO_CENTRIFUGADO:
-    sbi PORTD, 2        ; LED Centrifugado
-    sbi PORTC, 0        ; Motor derecha
-    rcall ESPERA_LARGA
-    cbi PORTC, 0
-    cbi PORTD, 2
+BUCLE_LAVADO:
+    sbi PORTC, 0         ; Prendo Motor Derecha (PC0)
 
-CICLO_SECADO:
-    sbi PORTD, 3        ; LED Secado
-    sbi PORTC, 0        ; Giro derecha
-    rcall ESPERA_LARGA
-    cbi PORTC, 0
-    rcall ESPERA_CORTA
-    sbi PORTC, 1        ; Giro izquierda
-    rcall ESPERA_LARGA
-    cbi PORTC, 1
-    cbi PORTD, 3
+    ; Elijo el tiempo de giro según la carga
+    cpi r17, 0
+    breq LAV_LIGERA
+    cpi r17, 1
+    breq LAV_MEDIA
 
-CICLO_FIN:
-    sbi PORTD, 4        ; LED Fin
-    rcall ESPERA_LARGA
-    cbi PORTD, 4
-    rjmp ESPERAR_ACCION
+    ; Si es pesada: 4 segundos
+    ldi r24, 4
+    rcall ESPERAR_SEGUNDOS
+    rjmp PAUSA_LAVADO
 
-; Subrutinas de tiempo
-ESPERA_CORTA:
-    ldi r18, 50
-T1: ldi r19, 200
-T2: ldi r20, 100
-T3: dec r20
-    brne T3
-    dec r19
-    brne T2
-    dec r18
-    brne T1
+LAV_LIGERA:
+    ldi r24, 2           ; 2 segundos
+    rcall ESPERAR_SEGUNDOS
+    rjmp PAUSA_LAVADO
+
+LAV_MEDIA:
+    ldi r24, 3           ; 3 segundos
+    rcall ESPERAR_SEGUNDOS
+
+PAUSA_LAVADO:
+    cbi PORTC, 0         ; Apago Motor Derecha
+
+    ; Elijo el tiempo de pausa según la carga
+    cpi r17, 0
+    breq PAU_LIGERA
+    cpi r17, 1
+    breq PAU_MEDIA
+
+    ; Si es pesada: 3 segundos
+    ldi r24, 3
+    rcall ESPERAR_SEGUNDOS
+    rjmp SIGUIENTE_LAVADO
+
+PAU_LIGERA:
+    ldi r24, 1           ; 1 segundo
+    rcall ESPERAR_SEGUNDOS
+    rjmp SIGUIENTE_LAVADO
+
+PAU_MEDIA:
+    ldi r24, 2           ; 2 segundos
+    rcall ESPERAR_SEGUNDOS
+
+SIGUIENTE_LAVADO:
+    dec r25              ; Descuento 1 al contador de 5 veces
+    brne BUCLE_LAVADO    ; Si no ha llegado a cero, repito
+
+    cbi PORTD, 1         ; Apago LED Lavado
+
+ETAPA_CENTRIFUGADO:
+    sbi PORTD, 2         ; Prendo LED Centrifugado (PD2)
+    sbi PORTC, 0         ; Prendo Motor Derecha (PC0)
+
+    cpi r17, 0
+    breq CEN_LIGERA
+    cpi r17, 1
+    breq CEN_MEDIA
+
+    ; Si es pesada: 21 segundos
+    ldi r24, 21
+    rcall ESPERAR_SEGUNDOS
+    rjmp FIN_CENTRIFUGADO
+
+CEN_LIGERA:
+    ldi r24, 15          ; 15 segundos
+    rcall ESPERAR_SEGUNDOS
+    rjmp FIN_CENTRIFUGADO
+
+CEN_MEDIA:
+    ldi r24, 18          ; 18 segundos
+    rcall ESPERAR_SEGUNDOS
+
+FIN_CENTRIFUGADO:
+    cbi PORTC, 0         ; Apago Motor
+    cbi PORTD, 2         ; Apaga LED Centrifugado
+
+ETAPA_SECADO:
+    sbi PORTD, 3         ; Prendo LED Secado (PD3)
+
+    ; --- 1. Giro a la Derecha ---
+    sbi PORTC, 0
+    cpi r17, 0
+    breq SEC_DER_LIGERA
+    cpi r17, 1
+    breq SEC_DER_MEDIA
+
+    ldi r24, 9           ; Pesada: 9 segundos
+    rcall ESPERAR_SEGUNDOS
+    rjmp PAUSA_SECADO
+
+SEC_DER_LIGERA:
+    ldi r24, 5           ; Ligera: 5 segundos
+    rcall ESPERAR_SEGUNDOS
+    rjmp PAUSA_SECADO
+
+SEC_DER_MEDIA:
+    ldi r24, 7           ; Media: 7 segundos
+    rcall ESPERAR_SEGUNDOS
+
+PAUSA_SECADO:
+    cbi PORTC, 0         ; Apago Motor Derecha
+
+    ; --- 2. Pausa entre giros ---
+    cpi r17, 0
+    breq SEC_PAU_LIGERA
+    cpi r17, 1
+    breq SEC_PAU_MEDIA
+
+    ldi r24, 7           ; Pesada: 7 segundos
+    rcall ESPERAR_SEGUNDOS
+    rjmp GIRO_IZQUIERDA
+
+SEC_PAU_LIGERA:
+    ldi r24, 3           ; Ligera: 3 segundos
+    rcall ESPERAR_SEGUNDOS
+    rjmp GIRO_IZQUIERDA
+
+SEC_PAU_MEDIA:
+    ldi r24, 5           ; Media: 5 segundos
+    rcall ESPERAR_SEGUNDOS
+
+GIRO_IZQUIERDA:
+    ; --- 3. Giro a la Izquierda ---
+    sbi PORTC, 1         ; Prendo Motor Izquierda (PC1)
+    cpi r17, 0
+    breq SEC_IZQ_LIGERA
+    cpi r17, 1
+    breq SEC_IZQ_MEDIA
+
+    ldi r24, 9           ; Pesada: 9 segundos
+    rcall ESPERAR_SEGUNDOS
+    rjmp FIN_SECADO
+
+SEC_IZQ_LIGERA:
+    ldi r24, 5           ; Ligera: 5 segundos
+    rcall ESPERAR_SEGUNDOS
+    rjmp FIN_SECADO
+
+SEC_IZQ_MEDIA:
+    ldi r24, 7           ; Media: 7 segundos
+    rcall ESPERAR_SEGUNDOS
+
+FIN_SECADO:
+    cbi PORTC, 1         ; Apago Motor Izquierda
+    cbi PORTD, 3         ; Apago LED Secado
+
+ETAPA_FIN:
+    sbi PORTD, 4         ; Prendo LED Fin (PD4)
+    ldi r24, 3           ; Mantiene encendido 3 segundos
+    rcall ESPERAR_SEGUNDOS
+    cbi PORTD, 4         ; Apago LED Fin
+
+    rjmp ESPERAR         ; Vuelvo al estado inicial
+
+
+; Cuenta la cantidad de segundos que le pongamos en el registro r24
+ESPERAR_SEGUNDOS:
+    tst r24
+    breq SALIR_ESPERA
+BUCLE_SEGUNDOS:
+    rcall ESPERA_UN_SEGUNDO
+    dec r24
+    brne BUCLE_SEGUNDOS
+SALIR_ESPERA:
     ret
 
-ESPERA_LARGA:
-    ldi r18, 250
-TL1: ldi r19, 250
-TL2: ldi r20, 100
-TL3: dec r20
+; Genera exactamente 1 segundo de tiempo a 16 MHz
+ESPERA_UN_SEGUNDO:
+    ldi r18, 82
+A1: ldi r19, 200
+A2: ldi r20, 250
+A3: dec r20
+    brne A3
+    dec r19
+    brne A2
+    dec r18
+    brne A1
+    ret
+
+; Pequeña pausa de 50 milisegundos para evitar rebotes en los botones
+RETARDO_50MS:
+    ldi r18, 5
+B1: ldi r19, 200
+B2: ldi r20, 100
+B3: dec r20
+    brne B3
+    dec r19
+    brne B2
+    dec r18
+    brne B1
+    ret
     brne TL3
     dec r19
     brne TL2
