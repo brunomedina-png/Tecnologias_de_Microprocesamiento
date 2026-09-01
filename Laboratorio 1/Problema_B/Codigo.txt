@@ -77,3 +77,27 @@ MOSTRAR_NUMERO:
 ; Patrones hexadecimales de 0 a 9 para catodo comun
 TABLA_7SEG:
     .db 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F
+
+ESPERAR_BOTON:
+    rcall DELAY
+    ; Espera a que se suelte el boton para evitar conteo continuo
+ESPERAR_SOLTAR:
+    in r16, PINB
+    andi r16, 0x07
+    cpi r16, 0x07
+    brne ESPERAR_SOLTAR
+    rcall DELAY
+    ret
+
+; Rutina simple de retardo
+DELAY:
+    ldi r18, 50
+D1: ldi r19, 200
+D2: ldi r20, 200
+D3: dec r20
+    brne D3
+    dec r19
+    brne D2
+    dec r18
+    brne D1
+    ret
