@@ -1,1 +1,430 @@
+; PROBLEMA C
 
+; PB0 -> Siguiente secuencia
+; PB1 -> Secuencia anterior
+; PB2 -> Volver a secuencia 1
+
+; PD0-PD7 -> 8 LEDs
+
+
+.include "m328pdef.inc"
+
+.def temp = r16
+.def modo = r17
+
+.cseg
+.org 0x0000
+    rjmp inicio
+
+
+
+; INICIO
+inicio:
+
+    ; Configurar pila
+    ldi temp, low(RAMEND)
+    out SPL, temp
+
+    ldi temp, high(RAMEND)
+    out SPH, temp
+
+    
+    ; PORTB como entrada
+    clr temp
+    out DDRB, temp
+
+    ; Activar pull-up en PB0, PB1 y PB2
+    ldi temp, 0x07
+    out PORTB, temp
+
+    
+    ; PORTD como salida
+    ldi temp, 0xFF
+    out DDRD, temp
+
+    ; Apagar LEDs
+    clr temp
+    out PORTD, temp
+
+    ; Comenzar en secuencia 1
+    clr modo
+
+
+
+; PROGRAMA PRINCIPAL
+main:
+
+    ; Ejecutar secuencia seleccionada
+    rcall secuencia
+
+    
+    ; Boton siguiente
+    sbis PINB, 0
+    rjmp siguiente
+
+
+    
+    ; Boton anterior
+    sbis PINB, 1
+    rjmp anterior
+
+
+    
+    ; Boton volver a secuencia 1
+    sbis PINB, 2
+    rjmp volver
+
+
+    rjmp main
+
+
+
+; SIGUIENTE SECUENCIA
+siguiente:
+
+    rcall antirrebote
+
+    inc modo
+
+    ; Si modo llega a 8, volver a 0
+    cpi modo, 8
+    brne esperar_sig
+
+    clr modo
+
+esperar_sig:
+
+    ; Esperar que se suelte el boton
+    sbis PINB, 0
+    rjmp esperar_sig
+
+    rcall antirrebote
+
+    rjmp main
+
+
+
+; SECUENCIA ANTERIOR
+anterior:
+
+    rcall antirrebote
+
+    ; Si modo = 0, pasar a la secuencia 8
+    tst modo
+    breq ultima
+
+    dec modo
+    rjmp esperar_ant
+
+ultima:
+
+    ldi modo, 7
+
+esperar_ant:
+
+    ; Esperar que se suelte el boton
+    sbis PINB, 1
+    rjmp esperar_ant
+
+    rcall antirrebote
+
+    rjmp main
+
+
+
+; VOLVER A SECUENCIA 1
+volver:
+
+    rcall antirrebote
+
+    ; Secuencia 1
+    clr modo
+
+esperar_volver:
+
+    ; Esperar que se suelte el boton
+    sbis PINB, 2
+    rjmp esperar_volver
+
+    rcall antirrebote
+
+    rjmp main
+
+
+
+; SELECCION DE SECUENCIA
+secuencia:
+
+    cpi modo, 0
+    breq sec1
+
+    cpi modo, 1
+    breq sec2
+
+    cpi modo, 2
+    breq sec3
+
+    cpi modo, 3
+    breq sec4
+
+    cpi modo, 4
+    breq sec5
+
+    cpi modo, 5
+    breq sec6
+
+    cpi modo, 6
+    breq sec7
+
+    rjmp sec8
+
+
+
+; SECUENCIA 1
+; LED SE DESPLAZA HACIA LA DERECHA
+sec1:
+
+    ldi temp, 0x01
+
+    out PORTD, temp
+    rcall delay
+
+    lsl temp
+    out PORTD, temp
+    rcall delay
+
+    lsl temp
+    out PORTD, temp
+    rcall delay
+
+    lsl temp
+    out PORTD, temp
+    rcall delay
+
+    lsl temp
+    out PORTD, temp
+    rcall delay
+
+    lsl temp
+    out PORTD, temp
+    rcall delay
+
+    lsl temp
+    out PORTD, temp
+    rcall delay
+
+    lsl temp
+    out PORTD, temp
+    rcall delay
+
+    ret
+
+
+
+; SECUENCIA 2
+; LED SE DESPLAZA HACIA LA IZQUIERDA
+sec2:
+
+    ldi temp, 0x80
+
+    out PORTD, temp
+    rcall delay
+
+    lsr temp
+    out PORTD, temp
+    rcall delay
+
+    lsr temp
+    out PORTD, temp
+    rcall delay
+
+    lsr temp
+    out PORTD, temp
+    rcall delay
+
+    lsr temp
+    out PORTD, temp
+    rcall delay
+
+    lsr temp
+    out PORTD, temp
+    rcall delay
+
+    lsr temp
+    out PORTD, temp
+    rcall delay
+
+    lsr temp
+    out PORTD, temp
+    rcall delay
+
+    ret
+
+
+
+; SECUENCIA 3
+; MOVIMIENTO DESDE EL CENTRO HACIA LOS EXTREMOS
+sec3:
+
+    ldi temp, 0x18
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x24
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x42
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x81
+    out PORTD, temp
+    rcall delay
+
+    ret
+
+
+
+; SECUENCIA 4
+; MOVIMIENTO DESDE LOS EXTREMOS HACIA EL CENTRO
+sec4:
+
+    ldi temp, 0x81
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x42
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x24
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x18
+    out PORTD, temp
+    rcall delay
+
+    ret
+
+
+
+; SECUENCIA 5
+; GRUPOS DE DOS LEDs
+sec5:
+
+    ldi temp, 0x03
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x0C
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x30
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0xC0
+    out PORTD, temp
+    rcall delay
+
+    ret
+
+
+
+; SECUENCIA 6
+; MITAD IZQUIERDA / MITAD DERECHA
+sec6:
+
+    ldi temp, 0x0F
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0xF0
+    out PORTD, temp
+    rcall delay
+
+    ret
+
+
+
+; SECUENCIA 7
+; LEDs ALTERNADOS
+sec7:
+
+    ldi temp, 0x55
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0xAA
+    out PORTD, temp
+    rcall delay
+
+    ret
+
+
+
+; SECUENCIA 8
+; TODOS LOS LEDs PARPADEAN
+sec8:
+
+    ldi temp, 0xFF
+    out PORTD, temp
+    rcall delay
+
+    ldi temp, 0x00
+    out PORTD, temp
+    rcall delay
+
+    ret
+
+
+
+; RETARDO
+delay:
+
+    ldi r20, 50
+
+d1:
+
+    ldi r21, 200
+
+d2:
+
+    ldi r22, 250
+
+d3:
+
+    dec r22
+    brne d3
+
+    dec r21
+    brne d2
+
+    dec r20
+    brne d1
+
+    ret
+
+
+
+; ANTIRREBOTE
+antirrebote:
+
+    ldi r23, 10
+
+r1:
+
+    ldi r24, 100
+
+r2:
+
+    dec r24
+    brne r2
+
+    dec r23
+    brne r1
+
+    ret
