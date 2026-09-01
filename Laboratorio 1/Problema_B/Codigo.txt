@@ -1,1 +1,25 @@
 
+; Problema B 
+.include "m328pdef.inc"
+
+.org 0x0000
+    rjmp INICIO
+
+INICIO:
+    ; Configurar Stack
+    ldi r16, LOW(RAMEND)
+    out SPL, r16
+    ldi r16, HIGH(RAMEND)
+    out SPH, r16
+
+    ; Puerto B: Entradas con pull-up (PB0, PB1, PB2)
+    clr r16
+    out DDRB, r16
+    ldi r16, 0x07
+    out PORTB, r16
+
+    ; Puerto D: Salidas para el display
+    ser r16
+    out DDRD, r16
+
+    clr r17 ; r17 guardara el contador (empieza en 0)
