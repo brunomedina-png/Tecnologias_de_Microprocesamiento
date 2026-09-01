@@ -1,1 +1,319 @@
+; Problema D
+
+.include "m328pdef.inc"
+
+.org 0x0000
+    rjmp INICIO
+
+INICIO:
+
+    ; Configurar la pila
+    ldi r16, LOW(RAMEND)
+    out SPL, r16
+    ldi r16, HIGH(RAMEND)
+    out SPH, r16
+
+    
+    ; PORTB
+    
+    ; PB0-PB3 = A0-A3
+    ; PB4-PB6 = S0-S2
+    
+
+    ; PB0-PB6 como entradas
+    ldi r16, 0x00
+    out DDRB, r16
+
+    ; Activar Pull-Up
+    ldi r16, 0x7F
+    out PORTB, r16
+
+    ; PORTC
+    ; PC0-PC3 = B0-B3
+    
+    ldi r16, 0x00
+    out DDRC, r16
+
+    ; Activar Pull-Up
+    ldi r16, 0x0F
+    out PORTC, r16
+
+
+    
+    ; PORTD
+    
+    ; PD0-PD3 = Resultado F0-F3
+    ; PD4 = Carry
+    ; PD5 = Negativo
+    ; PD6 = Zero
+    ; PD7 = libre
+    
+
+    ldi r16, 0x7F
+    out DDRD, r16
+
+    ; Apagar todas las salidas
+    clr r16
+    out PORTD, r16
+
+
+
+; BUCLE PRINCIPAL
+BUCLE:
+
+    ; Leer A
+    in r18, PINB
+    andi r18, 0x0F
+
+    ; Leer S
+    in r19, PINB
+    andi r19, 0x70
+
+    ; Desplazar S para obtener un numero de 0 a 7
+    lsr r19
+    lsr r19
+    lsr r19
+    lsr r19
+
+    ; Leer B
+    in r20, PINC
+    andi r20, 0x0F
+
+
+
+; Seleccion de operacion
+    cpi r19, 0
+    breq OPERACION_CLEAR
+
+    cpi r19, 1
+    breq OPERACION_RESTA
+
+    cpi r19, 2
+    breq OPERACION_SUMA
+
+    cpi r19, 3
+    breq OPERACION_XOR
+
+    cpi r19, 4
+    breq OPERACION_AND
+
+    cpi r19, 5
+    breq OPERACION_OR
+
+    cpi r19, 6
+    breq OPERACION_SHL
+
+    cpi r19, 7
+    breq OPERACION_INC
+
+    rjmp BUCLE
+
+
+
+; 000 - CLEAR
+OPERACION_CLEAR:
+
+    clr r21
+
+    ; Sin Carry
+    clr r22
+
+    rjmp MOSTRAR
+
+
+
+; 001 - A - B
+OPERACION_RESTA:
+
+    ; Copiar A
+    mov r21, r18
+
+    ; Restar B
+    sub r21, r20
+
+    ; Revisar Carry/Borrow
+    brcc RESTA_SIN_CARRY
+
+    ldi r22, 1
+    rjmp RESTA_FIN
+
+RESTA_SIN_CARRY:
+
+    clr r22
+
+RESTA_FIN:
+
+    rjmp MOSTRAR
+
+
+
+; 010 - A + B
+OPERACION_SUMA:
+
+    ; Copiar A
+    mov r21, r18
+
+    ; Sumar B
+    add r21, r20
+
+    ; Revisar Carry
+    brcc SUMA_SIN_CARRY
+
+    ldi r22, 1
+    rjmp MOSTRAR
+
+SUMA_SIN_CARRY:
+
+    clr r22
+
+    rjmp MOSTRAR
+
+
+; 011 - XOR
+OPERACION_XOR:
+
+    mov r21, r18
+    eor r21, r20
+
+    clr r22
+
+    rjmp MOSTRAR
+
+
+
+; 100 - AND
+OPERACION_AND:
+
+    mov r21, r18
+    and r21, r20
+
+    clr r22
+
+    rjmp MOSTRAR
+
+
+
+; 101 - OR
+OPERACION_OR:
+
+    mov r21, r18
+    or r21, r20
+
+    clr r22
+
+    rjmp MOSTRAR
+
+
+
+; 110 - SHL
+OPERACION_SHL:
+
+    mov r21, r18
+
+    ; Desplazar A una posicion a la izquierda
+    lsl r21
+
+    ; El bit que sale queda en Carry
+    brcc SHL_SIN_CARRY
+
+    ldi r22, 1
+    rjmp MOSTRAR
+
+SHL_SIN_CARRY:
+
+    clr r22
+
+    rjmp MOSTRAR
+
+
+
+; 111 - INC
+OPERACION_INC:
+
+    mov r21, r18
+
+    ; Incrementar A
+    inc r21
+
+    ; Para detectar el desbordamiento:
+    ; si A era 15, el resultado vuelve a 0
+    cpi r18, 15
+    brne INC_SIN_CARRY
+
+    ldi r22, 1
+    rjmp MOSTRAR
+
+INC_SIN_CARRY:
+
+    clr r22
+
+    rjmp MOSTRAR
+
+
+
+; MOSTRAR RESULTADO Y BANDERAS
+MOSTRAR:
+
+    
+    ; Mostrar resultado en PD0-PD3
+    mov r16, r21
+    andi r16, 0x0F
+
+    ; Borrar salida anterior
+    in r17, PORTD
+    andi r17, 0x80
+
+    ; Agregar resultado
+    or r17, r16
+
+    out PORTD, r17
+
+
+    
+    ; Carry - PD4
+    
+    cpi r22, 1
+    brne APAGAR_CARRY
+
+    sbi PORTD, 4
+    rjmp REVISAR_ZERO
+
+APAGAR_CARRY:
+
+    cbi PORTD, 4
+
+
+; Zero - PD6
+REVISAR_ZERO:
+
+    tst r21
+    brne NO_ES_CERO
+
+    sbi PORTD, 6
+    rjmp REVISAR_NEGATIVO
+
+NO_ES_CERO:
+
+    cbi PORTD, 6
+
+
+
+; Negativo - PD5
+; Se revisa el bit 3 del resultado.
+; Si esta en 1, se considera negativo.
+
+
+REVISAR_NEGATIVO:
+
+    sbrc r21, 3
+    rjmp RESULTADO_NEGATIVO
+
+    cbi PORTD, 5
+    rjmp BUCLE
+
+RESULTADO_NEGATIVO:
+
+    sbi PORTD, 5
+
+    rjmp BUCLE
 
