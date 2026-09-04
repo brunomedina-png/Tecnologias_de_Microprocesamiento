@@ -1,1 +1,174 @@
+.include "m328pdef.inc"
 
+.org 0x0000
+    rjmp INICIO
+
+INICIO:
+    ; Configurar pila
+    ldi r16, LOW(RAMEND)
+    out SPL, r16
+    ldi r16, HIGH(RAMEND)
+    out SPH, r16
+
+    ; Configurar salidas
+    ldi r16, 0b11111100
+    out DDRD, r16
+
+    ldi r16, 0b00111111
+    out DDRB, r16
+
+    ldi r16, 0b00001111
+    out DDRC, r16
+
+    ; Mostrar sonrisa
+    ldi ZL, LOW(SONRISA*2)
+    ldi ZH, HIGH(SONRISA*2)
+
+ESCANEAR:
+    ldi r19, 0
+
+FILA:
+    ; Apagar filas
+    in r20, PORTB
+    ori r20, 0b00111100
+    out PORTB, r20
+
+    in r20, PORTC
+    ori r20, 0b00001111
+    out PORTC, r20
+
+    ; Leer datos de la figura
+    lpm r18, Z+
+
+    ; Columnas C1-C6
+    mov r21, r18
+    andi r21, 0b00111111
+    lsl r21
+    lsl r21
+
+    in r20, PORTD
+    andi r20, 0b00000011
+    or r20, r21
+    out PORTD, r20
+
+    ; Columnas C7-C8
+    mov r21, r18
+    lsr r21
+    lsr r21
+    lsr r21
+    lsr r21
+    lsr r21
+    lsr r21
+    andi r21, 0b00000011
+
+    in r20, PORTB
+    andi r20, 0b11111100
+    or r20, r21
+    out PORTB, r20
+
+    ; Seleccionar fila
+    cpi r19, 0
+    breq F1
+
+    cpi r19, 1
+    breq F2
+
+    cpi r19, 2
+    breq F3
+
+    cpi r19, 3
+    breq F4
+
+    cpi r19, 4
+    breq F5
+
+    cpi r19, 5
+    breq F6
+
+    cpi r19, 6
+    breq F7
+
+    rjmp F8
+
+F1:
+    in r20, PORTB
+    andi r20, 0b11111011
+    out PORTB, r20
+    rjmp ESPERA_FILA
+
+F2:
+    in r20, PORTB
+    andi r20, 0b11110111
+    out PORTB, r20
+    rjmp ESPERA_FILA
+
+F3:
+    in r20, PORTB
+    andi r20, 0b11101111
+    out PORTB, r20
+    rjmp ESPERA_FILA
+
+F4:
+    in r20, PORTB
+    andi r20, 0b11011111
+    out PORTB, r20
+    rjmp ESPERA_FILA
+
+F5:
+    in r20, PORTC
+    andi r20, 0b11111110
+    out PORTC, r20
+    rjmp ESPERA_FILA
+
+F6:
+    in r20, PORTC
+    andi r20, 0b11111101
+    out PORTC, r20
+    rjmp ESPERA_FILA
+
+F7:
+    in r20, PORTC
+    andi r20, 0b11111011
+    out PORTC, r20
+    rjmp ESPERA_FILA
+
+F8:
+    in r20, PORTC
+    andi r20, 0b11110111
+    out PORTC, r20
+
+ESPERA_FILA:
+    rcall RETARDO
+
+    inc r19
+
+    cpi r19, 8
+    breq REINICIAR
+
+    rjmp FILA
+
+REINICIAR:
+    ldi ZL, LOW(SONRISA*2)
+    ldi ZH, HIGH(SONRISA*2)
+    rjmp ESCANEAR
+
+RETARDO:
+    ldi r22, 20
+
+RET1:
+    ldi r23, 250
+
+RET2:
+    dec r23
+    brne RET2
+
+    dec r22
+    brne RET1
+
+    ret
+
+.align 2
+
+SONRISA:
+    .db 0b00111100,0b01000010,0b10100101,0b10000001
+    .db 0b10100101,0b10011001,0b01000010,0b00111100
