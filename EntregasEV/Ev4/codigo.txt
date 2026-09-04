@@ -20,179 +20,244 @@ INICIO:
     ldi r16, 0b00001111
     out DDRC, r16
 
+    ; Pull-up de los botones
+    ldi r16, 0b00110000
+    out PORTC, r16
+
     ; Primera figura
     ldi r16, 0
-    rjmp MOSTRAR
+    rjmp BUCLE
+
+BUCLE:
+    rcall MOSTRAR
+
+    ; Botón anterior
+    sbis PINC,4
+    rjmp ANTERIOR
+
+    ; Botón siguiente
+    sbis PINC,5
+    rjmp SIGUIENTE
+
+    rjmp BUCLE
+
+ANTERIOR:
+    cpi r16,0
+    breq ANTERIOR_CERO
+
+    dec r16
+    rjmp ESPERAR_A4
+
+ANTERIOR_CERO:
+    ldi r16,5
+
+ESPERAR_A4:
+    rcall MOSTRAR
+
+    ; Esperar a soltar botón
+    sbis PINC,4
+    rjmp ESPERAR_A4
+
+    rjmp BUCLE
+
+SIGUIENTE:
+    inc r16
+
+    cpi r16,6
+    breq SIGUIENTE_CERO
+
+    rjmp ESPERAR_A5
+
+SIGUIENTE_CERO:
+    ldi r16,0
+
+ESPERAR_A5:
+    rcall MOSTRAR
+
+    ; Esperar a soltar botón
+    sbis PINC,5
+    rjmp ESPERAR_A5
+
+    rjmp BUCLE
 
 MOSTRAR:
-    cpi r16, 0
+    cpi r16,0
     breq DIBUJO_SONRISA
 
-    cpi r16, 1
+    cpi r16,1
     breq DIBUJO_GUINO
 
-    cpi r16, 2
+    cpi r16,2
     breq DIBUJO_CORAZON
 
-    cpi r16, 3
+    cpi r16,3
     breq DIBUJO_CARA3
 
-    cpi r16, 4
+    cpi r16,4
     breq DIBUJO_ASTERISCO
 
     rjmp DIBUJO_XD
 
 DIBUJO_SONRISA:
-    ldi ZL, LOW(SONRISA*2)
-    ldi ZH, HIGH(SONRISA*2)
+    ldi ZL,LOW(SONRISA*2)
+    ldi ZH,HIGH(SONRISA*2)
     rjmp ESCANEAR
 
 DIBUJO_GUINO:
-    ldi ZL, LOW(GUINO*2)
-    ldi ZH, HIGH(GUINO*2)
+    ldi ZL,LOW(GUINO*2)
+    ldi ZH,HIGH(GUINO*2)
     rjmp ESCANEAR
 
 DIBUJO_CORAZON:
-    ldi ZL, LOW(CORAZON*2)
-    ldi ZH, HIGH(CORAZON*2)
+    ldi ZL,LOW(CORAZON*2)
+    ldi ZH,HIGH(CORAZON*2)
     rjmp ESCANEAR
 
 DIBUJO_CARA3:
-    ldi ZL, LOW(CARA3*2)
-    ldi ZH, HIGH(CARA3*2)
+    ldi ZL,LOW(CARA3*2)
+    ldi ZH,HIGH(CARA3*2)
     rjmp ESCANEAR
 
 DIBUJO_ASTERISCO:
-    ldi ZL, LOW(ASTERISCO*2)
-    ldi ZH, HIGH(ASTERISCO*2)
+    ldi ZL,LOW(ASTERISCO*2)
+    ldi ZH,HIGH(ASTERISCO*2)
     rjmp ESCANEAR
 
 DIBUJO_XD:
-    ldi ZL, LOW(XD*2)
-    ldi ZH, HIGH(XD*2)
+    ldi ZL,LOW(XD*2)
+    ldi ZH,HIGH(XD*2)
 
 ESCANEAR:
-    ldi r19, 0
+    ldi r19,0
 
 FILA:
     ; Apagar filas
-    in r20, PORTB
-    ori r20, 0b00111100
-    out PORTB, r20
+    in r20,PORTB
+    ori r20,0b00111100
+    out PORTB,r20
 
-    in r20, PORTC
-    ori r20, 0b00001111
-    out PORTC, r20
+    in r20,PORTC
+    ori r20,0b00001111
+    out PORTC,r20
 
-    lpm r18, Z+
+    ; Leer fila
+    lpm r18,Z+
 
     ; Columnas C1-C6
-    mov r21, r18
-    andi r21, 0b00111111
+    mov r21,r18
+    andi r21,0b00111111
     lsl r21
     lsl r21
 
-    in r20, PORTD
-    andi r20, 0b00000011
-    or r20, r21
-    out PORTD, r20
+    in r20,PORTD
+    andi r20,0b00000011
+    or r20,r21
+    out PORTD,r20
 
     ; Columnas C7-C8
-    mov r21, r18
+    mov r21,r18
     lsr r21
     lsr r21
     lsr r21
     lsr r21
     lsr r21
     lsr r21
-    andi r21, 0b00000011
+    andi r21,0b00000011
 
-    in r20, PORTB
-    andi r20, 0b11111100
-    or r20, r21
-    out PORTB, r20
+    in r20,PORTB
+    andi r20,0b11111100
+    or r20,r21
+    out PORTB,r20
 
     ; Seleccionar fila
-    cpi r19, 0
+    cpi r19,0
     breq F1
-    cpi r19, 1
+
+    cpi r19,1
     breq F2
-    cpi r19, 2
+
+    cpi r19,2
     breq F3
-    cpi r19, 3
+
+    cpi r19,3
     breq F4
-    cpi r19, 4
+
+    cpi r19,4
     breq F5
-    cpi r19, 5
+
+    cpi r19,5
     breq F6
-    cpi r19, 6
+
+    cpi r19,6
     breq F7
+
     rjmp F8
 
 F1:
-    in r20, PORTB
-    andi r20, 0b11111011
-    out PORTB, r20
+    in r20,PORTB
+    andi r20,0b11111011
+    out PORTB,r20
     rjmp ESPERA_FILA
 
 F2:
-    in r20, PORTB
-    andi r20, 0b11110111
-    out PORTB, r20
+    in r20,PORTB
+    andi r20,0b11110111
+    out PORTB,r20
     rjmp ESPERA_FILA
 
 F3:
-    in r20, PORTB
-    andi r20, 0b11101111
-    out PORTB, r20
+    in r20,PORTB
+    andi r20,0b11101111
+    out PORTB,r20
     rjmp ESPERA_FILA
 
 F4:
-    in r20, PORTB
-    andi r20, 0b11011111
-    out PORTB, r20
+    in r20,PORTB
+    andi r20,0b11011111
+    out PORTB,r20
     rjmp ESPERA_FILA
 
 F5:
-    in r20, PORTC
-    andi r20, 0b11111110
-    out PORTC, r20
+    in r20,PORTC
+    andi r20,0b11111110
+    out PORTC,r20
     rjmp ESPERA_FILA
 
 F6:
-    in r20, PORTC
-    andi r20, 0b11111101
-    out PORTC, r20
+    in r20,PORTC
+    andi r20,0b11111101
+    out PORTC,r20
     rjmp ESPERA_FILA
 
 F7:
-    in r20, PORTC
-    andi r20, 0b11111011
-    out PORTC, r20
+    in r20,PORTC
+    andi r20,0b11111011
+    out PORTC,r20
     rjmp ESPERA_FILA
 
 F8:
-    in r20, PORTC
-    andi r20, 0b11110111
-    out PORTC, r20
+    in r20,PORTC
+    andi r20,0b11110111
+    out PORTC,r20
 
 ESPERA_FILA:
     rcall RETARDO
 
     inc r19
-    cpi r19, 8
+
+    cpi r19,8
     breq FIN_MOSTRAR
 
     rjmp FILA
 
 FIN_MOSTRAR:
-    rjmp MOSTRAR
+    ret
 
 RETARDO:
-    ldi r22, 20
+    ldi r22,20
 
 RET1:
-    ldi r23, 250
+    ldi r23,250
 
 RET2:
     dec r23
@@ -206,25 +271,19 @@ RET2:
 .align 2
 
 SONRISA:
-    .db 0b00111100,0b01000010,0b10100101,0b10000001
-    .db 0b10100101,0b10011001,0b01000010,0b00111100
+    .db 0b00111100,0b01000010,0b10100101,0b10000001,0b10100101,0b10011001,0b01000010,0b00111100
 
 GUINO:
-    .db 0b00111100,0b01000010,0b10101101,0b10000001
-    .db 0b10100101,0b10011001,0b01000010,0b00111100
+    .db 0b00111100,0b01000010,0b10101101,0b10000001,0b10100101,0b10011001,0b01000010,0b00111100
 
 CORAZON:
-    .db 0b01100110,0b11111111,0b11111111,0b11111111
-    .db 0b01111110,0b00111100,0b00011000,0b00000000
+    .db 0b01100110,0b11111111,0b11111111,0b11111111,0b01111110,0b00111100,0b00011000,0b00000000
 
 CARA3:
-    .db 0b00001110,0b01100001,0b01100001,0b00001111
-    .db 0b00001111,0b01100001,0b01100001,0b00001110
+    .db 0b00001110,0b01100001,0b01100001,0b00001111,0b00001111,0b01100001,0b01100001,0b00001110
 
 ASTERISCO:
-    .db 0b10010010,0b01010100,0b00111000,0b11111110
-    .db 0b00111000,0b01010100,0b10010010,0b00000000
+    .db 0b10010010,0b01010100,0b00111000,0b11111110,0b00111000,0b01010100,0b10010010,0b00000000
 
 XD:
-    .db 0b00010001,0b00001010,0b00000100,0b01101010
-    .db 0b10110001,0b10100000,0b10100000,0b01100000
+    .db 0b00010001,0b00001010,0b00000100,0b01101010,0b10110001,0b10100000,0b10100000,0b01100000
