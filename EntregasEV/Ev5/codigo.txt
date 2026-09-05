@@ -1,1 +1,280 @@
+.include "m328Pdef.inc"
 
+.org 0x0000
+    rjmp INICIO
+
+INICIO:
+
+    ; Configurar pila
+    ldi r16, HIGH(RAMEND)
+    out SPH, r16
+    ldi r16, LOW(RAMEND)
+    out SPL, r16
+
+    ; Configurar display
+    ; PD2-PD7 = A-F
+    ldi r16, 0b11111100
+    out DDRD, r16
+
+    ; PB0 = G
+    ldi r16, 0b00000001
+    out DDRB, r16
+
+    ; Apagar display
+    ldi r16, 0
+    out PORTD, r16
+    out PORTB, r16
+
+    ; Configurar USART a 9600 baud
+    ldi r16, 103
+    sts UBRR0L, r16
+
+    ldi r16, 0
+    sts UBRR0H, r16
+
+    ; Activar RX y TX
+    ldi r16, (1<<RXEN0)|(1<<TXEN0)
+    sts UCSR0B, r16
+
+    ; 8 bits, sin paridad, 1 bit de parada
+    ldi r16, (1<<UCSZ01)|(1<<UCSZ00)
+    sts UCSR0C, r16
+
+
+MAIN:
+
+    ; Esperar un caracter
+    rcall RECIBIR
+
+    ; Enviar el caracter recibido
+    rcall TRANSMITIR
+
+    ; Convertir caracter a numero
+    rcall CONVERTIR
+
+    ; Mostrar en el display
+    rcall MOSTRAR
+
+    rjmp MAIN
+
+
+RECIBIR:
+
+ESPERAR:
+
+    lds r16, UCSR0A
+
+    sbrs r16, RXC0
+    rjmp ESPERAR
+
+    lds r17, UDR0
+
+    ret
+
+
+TRANSMITIR:
+
+ESPERAR_TX:
+
+    lds r16, UCSR0A
+
+    sbrs r16, UDRE0
+    rjmp ESPERAR_TX
+
+    sts UDR0, r17
+
+    ret
+
+
+CONVERTIR:
+
+    cpi r17, '0'
+    breq CERO
+
+    cpi r17, '1'
+    breq UNO
+
+    cpi r17, '2'
+    breq DOS
+
+    cpi r17, '3'
+    breq TRES
+
+    cpi r17, '4'
+    breq CUATRO
+
+    cpi r17, '5'
+    breq CINCO
+
+    cpi r17, '6'
+    breq SEIS
+
+    cpi r17, '7'
+    breq SIETE
+
+    cpi r17, '8'
+    breq OCHO
+
+    cpi r17, '9'
+    breq NUEVE
+
+    cpi r17, 'A'
+    breq DIEZ
+
+    cpi r17, 'B'
+    breq ONCE
+
+    cpi r17, 'C'
+    breq DOCE
+
+    cpi r17, 'D'
+    breq TRECE
+
+    cpi r17, 'E'
+    breq CATORCE
+
+    cpi r17, 'F'
+    breq QUINCE
+
+    cpi r17, 'a'
+    breq DIEZ
+
+    cpi r17, 'b'
+    breq ONCE
+
+    cpi r17, 'c'
+    breq DOCE
+
+    cpi r17, 'd'
+    breq TRECE
+
+    cpi r17, 'e'
+    breq CATORCE
+
+    cpi r17, 'f'
+    breq QUINCE
+
+    ret
+
+
+CERO:
+    ldi r18, 0
+    ret
+
+UNO:
+    ldi r18, 1
+    ret
+
+DOS:
+    ldi r18, 2
+    ret
+
+TRES:
+    ldi r18, 3
+    ret
+
+CUATRO:
+    ldi r18, 4
+    ret
+
+CINCO:
+    ldi r18, 5
+    ret
+
+SEIS:
+    ldi r18, 6
+    ret
+
+SIETE:
+    ldi r18, 7
+    ret
+
+OCHO:
+    ldi r18, 8
+    ret
+
+NUEVE:
+    ldi r18, 9
+    ret
+
+DIEZ:
+    ldi r18, 10
+    ret
+
+ONCE:
+    ldi r18, 11
+    ret
+
+DOCE:
+    ldi r18, 12
+    ret
+
+TRECE:
+    ldi r18, 13
+    ret
+
+CATORCE:
+    ldi r18, 14
+    ret
+
+QUINCE:
+    ldi r18, 15
+    ret
+
+
+MOSTRAR:
+
+    ; Cargar direccion de la LUT
+    ldi ZH, HIGH(LUT<<1)
+    ldi ZL, LOW(LUT<<1)
+
+    ; Multiplicar indice por 2
+    add r18, r18
+
+    ; Buscar valor en la LUT
+    add ZL, r18
+
+    ldi r16, 0
+    adc ZH, r16
+
+    ; Leer la LUT
+    lpm r16, Z
+
+    ; Mostrar segmento G
+    sbrc r16, 6
+    sbi PORTB, PB0
+
+    sbrs r16, 6
+    cbi PORTB, PB0
+
+    ; Pasar A-F a PD2-PD7
+    lsl r16
+    lsl r16
+
+    ; Mantener PD2-PD7
+    andi r16, 0b11111100
+
+    ; Mostrar A-F
+    out PORTD, r16
+
+    ret
+
+
+LUT:
+
+    .db 0b00111111    ; 0
+    .db 0b00000110    ; 1
+    .db 0b01011011    ; 2
+    .db 0b01001111    ; 3
+    .db 0b01100110    ; 4
+    .db 0b01101101    ; 5
+    .db 0b01111101    ; 6
+    .db 0b00000111    ; 7
+    .db 0b01111111    ; 8
+    .db 0b01101111    ; 9
+    .db 0b01110111    ; A
+    .db 0b01111100    ; b
+    .db 0b00111001    ; C
+    .db 0b01011110    ; d
+    .db 0b01111001    ; E
+    .db 0b01110001    ; F
