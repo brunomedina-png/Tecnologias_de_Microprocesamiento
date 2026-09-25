@@ -1,1 +1,152 @@
+.include "m328Pdef.inc"
 
+.def FILA = r16
+.def DATA = r17
+.def TEMP = r18
+.def TEMP2 = r19
+
+.org 0x0000
+    rjmp INICIO
+
+INICIO:
+    ldi TEMP, HIGH(RAMEND)
+    out SPH, TEMP
+    ldi TEMP, LOW(RAMEND)
+    out SPL, TEMP
+
+    ldi TEMP, 0b11111110
+    out DDRD, TEMP
+
+    ldi TEMP, 0b00111111
+    out DDRB, TEMP
+
+    ldi TEMP, 0b00001111
+    out DDRC, TEMP
+
+    rcall APAGAR
+
+MAIN:
+    ldi ZL, low(SONRISA*2)
+    ldi ZH, high(SONRISA*2)
+
+    ldi FILA, 0
+
+MOSTRAR:
+    rcall APAGAR_FILAS
+
+    lpm DATA, Z+
+
+    mov TEMP2, DATA
+    andi TEMP2, 0b00111111
+    lsl TEMP2
+    lsl TEMP2
+
+    in TEMP, PORTD
+    andi TEMP, 0b00000011
+    or TEMP, TEMP2
+    out PORTD, TEMP
+
+    mov TEMP2, DATA
+    lsr TEMP2
+    lsr TEMP2
+    lsr TEMP2
+    lsr TEMP2
+    lsr TEMP2
+    lsr TEMP2
+    andi TEMP2, 0b00000011
+
+    in TEMP, PORTB
+    andi TEMP, 0b11111100
+    or TEMP, TEMP2
+    out PORTB, TEMP
+
+    cpi FILA, 0
+    breq F0
+    cpi FILA, 1
+    breq F1
+    cpi FILA, 2
+    breq F2
+    cpi FILA, 3
+    breq F3
+    cpi FILA, 4
+    breq F4
+    cpi FILA, 5
+    breq F5
+    cpi FILA, 6
+    breq F6
+    rjmp F7
+
+F0:
+    cbi PORTB, 2
+    rjmp ESPERA
+
+F1:
+    cbi PORTB, 3
+    rjmp ESPERA
+
+F2:
+    cbi PORTB, 4
+    rjmp ESPERA
+
+F3:
+    cbi PORTB, 5
+    rjmp ESPERA
+
+F4:
+    cbi PORTC, 0
+    rjmp ESPERA
+
+F5:
+    cbi PORTC, 1
+    rjmp ESPERA
+
+F6:
+    cbi PORTC, 2
+    rjmp ESPERA
+
+F7:
+    cbi PORTC, 3
+
+ESPERA:
+    ldi TEMP, 10
+
+RET1:
+    ldi TEMP2, 200
+
+RET2:
+    dec TEMP2
+    brne RET2
+
+    dec TEMP
+    brne RET1
+
+    inc FILA
+    cpi FILA, 8
+    brlo MOSTRAR
+
+    rjmp MAIN
+
+APAGAR_FILAS:
+    sbi PORTB, 2
+    sbi PORTB, 3
+    sbi PORTB, 4
+    sbi PORTB, 5
+    sbi PORTC, 0
+    sbi PORTC, 1
+    sbi PORTC, 2
+    sbi PORTC, 3
+    ret
+
+APAGAR:
+    rcall APAGAR_FILAS
+    clr TEMP
+    out PORTD, TEMP
+
+    in TEMP, PORTB
+    andi TEMP, 0b11111100
+    out PORTB, TEMP
+    ret
+
+SONRISA:
+    .db 0b00111100,0b01000010,0b10100101,0b10000001
+    .db 0b10100101,0b10011001,0b01000010,0b00111100
