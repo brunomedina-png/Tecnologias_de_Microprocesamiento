@@ -1,9 +1,13 @@
 .include "m328Pdef.inc"
 
 .def FILA = r16
-.def DATA = r17
-.def TEMP = r18
-.def TEMP2 = r19
+.def POS = r17
+.def DATA = r18
+.def TEMP = r19
+.def TEMP2 = r20
+.def MASK = r21
+
+.equ VELOCIDAD = 180
 
 .org 0x0000
     rjmp INICIO
@@ -23,42 +27,132 @@ INICIO:
     ldi TEMP, 0b00001111
     out DDRC, TEMP
 
-    rcall APAGAR
+    clr r1
+    ldi POS, 0
 
 MAIN:
-    ldi ZL, low(SONRISA*2)
-    ldi ZH, high(SONRISA*2)
-
     ldi FILA, 0
+    rcall MOSTRAR_FILA
 
-MOSTRAR:
+    ldi FILA, 1
+    rcall MOSTRAR_FILA
+
+    ldi FILA, 2
+    rcall MOSTRAR_FILA
+
+    ldi FILA, 3
+    rcall MOSTRAR_FILA
+
+    ldi FILA, 4
+    rcall MOSTRAR_FILA
+
+    ldi FILA, 5
+    rcall MOSTRAR_FILA
+
+    ldi FILA, 6
+    rcall MOSTRAR_FILA
+
+    ldi FILA, 7
+    rcall MOSTRAR_FILA
+
+    dec TEMP2
+    brne MAIN
+
+    ldi TEMP2, VELOCIDAD
+
+    inc POS
+
+    cpi POS, 208
+    brlo MAIN
+
+    ldi POS, 0
+    rjmp MAIN
+
+MOSTRAR_FILA:
     rcall APAGAR_FILAS
 
-    lpm DATA, Z+
+    ldi ZL, low(TABLA*2)
+    ldi ZH, high(TABLA*2)
 
-    mov TEMP2, DATA
-    andi TEMP2, 0b00111111
-    lsl TEMP2
-    lsl TEMP2
+    add ZL, POS
+    adc ZH, r1
 
-    in TEMP, PORTD
-    andi TEMP, 0b00000011
-    or TEMP, TEMP2
+    clr DATA
+
+    ldi MASK, 1
+    lpm TEMP, Z
+    sbrc TEMP, 0
+    or DATA, MASK
+    adiw ZL, 1
+
+    ldi MASK, 2
+    lpm TEMP, Z
+    sbrc TEMP, 1
+    or DATA, MASK
+    adiw ZL, 1
+
+    ldi MASK, 4
+    lpm TEMP, Z
+    sbrc TEMP, 2
+    or DATA, MASK
+    adiw ZL, 1
+
+    ldi MASK, 8
+    lpm TEMP, Z
+    sbrc TEMP, 3
+    or DATA, MASK
+    adiw ZL, 1
+
+    ldi MASK, 16
+    lpm TEMP, Z
+    sbrc TEMP, 4
+    or DATA, MASK
+    adiw ZL, 1
+
+    ldi MASK, 32
+    lpm TEMP, Z
+    sbrc TEMP, 5
+    or DATA, MASK
+    adiw ZL, 1
+
+    ldi MASK, 64
+    lpm TEMP, Z
+    sbrc TEMP, 6
+    or DATA, MASK
+    adiw ZL, 1
+
+    ldi MASK, 128
+    lpm TEMP, Z
+    sbrc TEMP, 7
+    or DATA, MASK
+
+    rcall CARGAR
+    ret
+
+CARGAR:
+    clr TEMP
     out PORTD, TEMP
-
-    mov TEMP2, DATA
-    lsr TEMP2
-    lsr TEMP2
-    lsr TEMP2
-    lsr TEMP2
-    lsr TEMP2
-    lsr TEMP2
-    andi TEMP2, 0b00000011
 
     in TEMP, PORTB
     andi TEMP, 0b11111100
-    or TEMP, TEMP2
     out PORTB, TEMP
+
+    sbrc DATA, 0
+    sbi PORTD, 2
+    sbrc DATA, 1
+    sbi PORTD, 3
+    sbrc DATA, 2
+    sbi PORTD, 4
+    sbrc DATA, 3
+    sbi PORTD, 5
+    sbrc DATA, 4
+    sbi PORTD, 6
+    sbrc DATA, 5
+    sbi PORTD, 7
+    sbrc DATA, 6
+    sbi PORTB, 0
+    sbrc DATA, 7
+    sbi PORTB, 1
 
     cpi FILA, 0
     breq F0
@@ -78,53 +172,47 @@ MOSTRAR:
 
 F0:
     cbi PORTB, 2
-    rjmp ESPERA
+    rjmp RETARDO
 
 F1:
     cbi PORTB, 3
-    rjmp ESPERA
+    rjmp RETARDO
 
 F2:
     cbi PORTB, 4
-    rjmp ESPERA
+    rjmp RETARDO
 
 F3:
     cbi PORTB, 5
-    rjmp ESPERA
+    rjmp RETARDO
 
 F4:
     cbi PORTC, 0
-    rjmp ESPERA
+    rjmp RETARDO
 
 F5:
     cbi PORTC, 1
-    rjmp ESPERA
+    rjmp RETARDO
 
 F6:
     cbi PORTC, 2
-    rjmp ESPERA
+    rjmp RETARDO
 
 F7:
     cbi PORTC, 3
 
-ESPERA:
-    ldi TEMP, 10
+RETARDO:
+    ldi TEMP, 2
 
-RET1:
-    ldi TEMP2, 200
+R1:
+    ldi TEMP2, 80
 
-RET2:
+R2:
     dec TEMP2
-    brne RET2
-
+    brne R2
     dec TEMP
-    brne RET1
-
-    inc FILA
-    cpi FILA, 8
-    brlo MOSTRAR
-
-    rjmp MAIN
+    brne R1
+    ret
 
 APAGAR_FILAS:
     sbi PORTB, 2
@@ -137,16 +225,40 @@ APAGAR_FILAS:
     sbi PORTC, 3
     ret
 
-APAGAR:
-    rcall APAGAR_FILAS
-    clr TEMP
-    out PORTD, TEMP
+TABLA:
+    .db 0,0,0,0,0,0,0,0
 
-    in TEMP, PORTB
-    andi TEMP, 0b11111100
-    out PORTB, TEMP
-    ret
+    .db 0,0,32,64,64,64,63,0
+    .db 0,0,127,73,73,73,65,0
+    .db 0,0,127,73,73,73,54,0
+    .db 0,0,63,64,64,64,63,0
+    .db 0,0,70,73,73,73,57,0
 
-SONRISA:
-    .db 0b00111100,0b01000010,0b10100101,0b10000001
-    .db 0b10100101,0b10011001,0b01000010,0b00111100
+    .db 0,0,0,0,0,0,0,0
+
+    .db 0,0,3,4,120,4,3,0
+
+    .db 0,0,0,0,0,0,0,0
+
+    .db 0,0,127,2,12,2,127,0
+    .db 0,0,126,9,9,9,126,0
+    .db 0,0,127,9,25,41,70,0
+    .db 0,0,62,65,65,65,34,0
+    .db 0,0,127,73,73,73,65,0
+    .db 0,0,127,64,64,64,64,0
+    .db 0,0,62,65,65,65,62,0
+
+    .db 0,0,0,0,0,0,0,0
+
+    .db 0,0,127,64,64,64,64,0
+    .db 0,0,62,65,65,65,62,0
+
+    .db 0,0,0,0,0,0,0,0
+
+    .db 0,0,127,2,12,2,127,0
+    .db 0,0,127,73,73,73,65,0
+    .db 0,0,32,64,64,64,63,0
+    .db 0,0,62,65,65,65,62,0
+    .db 0,0,127,9,25,41,70,0
+
+    .db 0,0,0,0,0,0,0,0
