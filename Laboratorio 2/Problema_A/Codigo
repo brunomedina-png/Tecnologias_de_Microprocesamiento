@@ -1,13 +1,14 @@
 .include "m328Pdef.inc"
 
-.def FILA = r16
-.def POS = r17
-.def DATA = r18
-.def TEMP = r19
-.def TEMP2 = r20
-.def MASK = r21
+.def MODE = r16
+.def DATA_UART = r17
+.def FILA = r18
+.def POS = r19
+.def TEMP = r20
+.def TEMP2 = r21
+.def DATA = r22
 
-.equ VELOCIDAD = 180
+.equ UBRR_VAL = 103
 
 .org 0x0000
     rjmp INICIO
@@ -28,45 +29,182 @@ INICIO:
     out DDRC, TEMP
 
     clr r1
+
+    rcall UART_INICIO
+    rcall APAGAR
+
+    ldi MODE, 0
     ldi POS, 0
 
+    rcall MOSTRAR_MENU
+
 MAIN:
+    rcall UART_REVISAR
+
+    cpi MODE, 0
+    breq TEXTO
+
+    cpi MODE, 1
+    breq SONRISA_M
+
+    cpi MODE, 2
+    breq GUINO_M
+
+    cpi MODE, 3
+    breq CORAZON_M
+
+    cpi MODE, 4
+    breq CARA_M
+
+    cpi MODE, 5
+    breq ASTERISCO_M
+
+    rjmp XD_M
+
+TEXTO:
     ldi FILA, 0
     rcall MOSTRAR_FILA
-
     ldi FILA, 1
     rcall MOSTRAR_FILA
-
     ldi FILA, 2
     rcall MOSTRAR_FILA
-
     ldi FILA, 3
     rcall MOSTRAR_FILA
-
     ldi FILA, 4
     rcall MOSTRAR_FILA
-
     ldi FILA, 5
     rcall MOSTRAR_FILA
-
     ldi FILA, 6
     rcall MOSTRAR_FILA
-
     ldi FILA, 7
     rcall MOSTRAR_FILA
 
-    dec TEMP2
-    brne MAIN
-
-    ldi TEMP2, VELOCIDAD
-
     inc POS
-
     cpi POS, 208
     brlo MAIN
-
     ldi POS, 0
     rjmp MAIN
+
+SONRISA_M:
+    ldi ZL, low(SONRISA*2)
+    ldi ZH, high(SONRISA*2)
+    rcall ESCANEAR
+    rjmp MAIN
+
+GUINO_M:
+    ldi ZL, low(GUINO*2)
+    ldi ZH, high(GUINO*2)
+    rcall ESCANEAR
+    rjmp MAIN
+
+CORAZON_M:
+    ldi ZL, low(CORAZON*2)
+    ldi ZH, high(CORAZON*2)
+    rcall ESCANEAR
+    rjmp MAIN
+
+CARA_M:
+    ldi ZL, low(CARA3*2)
+    ldi ZH, high(CARA3*2)
+    rcall ESCANEAR
+    rjmp MAIN
+
+ASTERISCO_M:
+    ldi ZL, low(ASTERISCO*2)
+    ldi ZH, high(ASTERISCO*2)
+    rcall ESCANEAR
+    rjmp MAIN
+
+XD_M:
+    ldi ZL, low(XD*2)
+    ldi ZH, high(XD*2)
+    rcall ESCANEAR
+    rjmp MAIN
+
+UART_INICIO:
+    ldi TEMP, UBRR_VAL
+    sts UBRR0L, TEMP
+    ldi TEMP, 0
+    sts UBRR0H, TEMP
+
+    ldi TEMP, (1<<RXEN0)|(1<<TXEN0)
+    sts UCSR0B, TEMP
+
+    ldi TEMP, (1<<UCSZ01)|(1<<UCSZ00)
+    sts UCSR0C, TEMP
+    ret
+
+UART_REVISAR:
+    lds TEMP, UCSR0A
+    sbrs TEMP, RXC0
+    ret
+
+    lds DATA_UART, UDR0
+
+    cpi DATA_UART, '1'
+    breq U1
+    cpi DATA_UART, '2'
+    breq U2
+    cpi DATA_UART, '3'
+    breq U3
+    cpi DATA_UART, '4'
+    breq U4
+    cpi DATA_UART, '5'
+    breq U5
+    cpi DATA_UART, '6'
+    breq U6
+    cpi DATA_UART, '7'
+    breq U7
+    ret
+
+U1:
+    ldi MODE, 0
+    ldi POS, 0
+    ret
+
+U2:
+    ldi MODE, 1
+    ret
+
+U3:
+    ldi MODE, 2
+    ret
+
+U4:
+    ldi MODE, 3
+    ret
+
+U5:
+    ldi MODE, 4
+    ret
+
+U6:
+    ldi MODE, 5
+    ret
+
+U7:
+    ldi MODE, 6
+    ret
+
+MOSTRAR_MENU:
+    ldi ZL, low(MENU*2)
+    ldi ZH, high(MENU*2)
+
+MENU_LOOP:
+    lpm TEMP, Z+
+    tst TEMP
+    breq MENU_FIN
+
+ESPERA_TX:
+    lds TEMP2, UCSR0A
+    sbrs TEMP2, UDRE0
+    rjmp ESPERA_TX
+
+    sts UDR0, TEMP
+    rjmp MENU_LOOP
+
+MENU_FIN:
+    ret
 
 MOSTRAR_FILA:
     rcall APAGAR_FILAS
@@ -79,52 +217,44 @@ MOSTRAR_FILA:
 
     clr DATA
 
-    ldi MASK, 1
     lpm TEMP, Z
     sbrc TEMP, 0
-    or DATA, MASK
+    ori DATA, 1
     adiw ZL, 1
 
-    ldi MASK, 2
     lpm TEMP, Z
     sbrc TEMP, 1
-    or DATA, MASK
+    ori DATA, 2
     adiw ZL, 1
 
-    ldi MASK, 4
     lpm TEMP, Z
     sbrc TEMP, 2
-    or DATA, MASK
+    ori DATA, 4
     adiw ZL, 1
 
-    ldi MASK, 8
     lpm TEMP, Z
     sbrc TEMP, 3
-    or DATA, MASK
+    ori DATA, 8
     adiw ZL, 1
 
-    ldi MASK, 16
     lpm TEMP, Z
     sbrc TEMP, 4
-    or DATA, MASK
+    ori DATA, 16
     adiw ZL, 1
 
-    ldi MASK, 32
     lpm TEMP, Z
     sbrc TEMP, 5
-    or DATA, MASK
+    ori DATA, 32
     adiw ZL, 1
 
-    ldi MASK, 64
     lpm TEMP, Z
     sbrc TEMP, 6
-    or DATA, MASK
+    ori DATA, 64
     adiw ZL, 1
 
-    ldi MASK, 128
     lpm TEMP, Z
     sbrc TEMP, 7
-    or DATA, MASK
+    ori DATA, 128
 
     rcall CARGAR
     ret
@@ -155,53 +285,53 @@ CARGAR:
     sbi PORTB, 1
 
     cpi FILA, 0
-    breq F0
+    breq CF0
     cpi FILA, 1
-    breq F1
+    breq CF1
     cpi FILA, 2
-    breq F2
+    breq CF2
     cpi FILA, 3
-    breq F3
+    breq CF3
     cpi FILA, 4
-    breq F4
+    breq CF4
     cpi FILA, 5
-    breq F5
+    breq CF5
     cpi FILA, 6
-    breq F6
-    rjmp F7
+    breq CF6
+    rjmp CF7
 
-F0:
+CF0:
     cbi PORTB, 2
-    rjmp RETARDO
+    rjmp ESPERA
 
-F1:
+CF1:
     cbi PORTB, 3
-    rjmp RETARDO
+    rjmp ESPERA
 
-F2:
+CF2:
     cbi PORTB, 4
-    rjmp RETARDO
+    rjmp ESPERA
 
-F3:
+CF3:
     cbi PORTB, 5
-    rjmp RETARDO
+    rjmp ESPERA
 
-F4:
+CF4:
     cbi PORTC, 0
-    rjmp RETARDO
+    rjmp ESPERA
 
-F5:
+CF5:
     cbi PORTC, 1
-    rjmp RETARDO
+    rjmp ESPERA
 
-F6:
+CF6:
     cbi PORTC, 2
-    rjmp RETARDO
+    rjmp ESPERA
 
-F7:
+CF7:
     cbi PORTC, 3
 
-RETARDO:
+ESPERA:
     ldi TEMP, 2
 
 R1:
@@ -212,6 +342,96 @@ R2:
     brne R2
     dec TEMP
     brne R1
+    ret
+
+ESCANEAR:
+    ldi FILA, 0
+
+FIGURA:
+    rcall APAGAR_FILAS
+
+    lpm DATA, Z+
+
+    mov TEMP, DATA
+    andi TEMP, 0b00111111
+    lsl TEMP
+    lsl TEMP
+
+    in TEMP2, PORTD
+    andi TEMP2, 3
+    or TEMP2, TEMP
+    out PORTD, TEMP2
+
+    mov TEMP, DATA
+    lsr TEMP
+    lsr TEMP
+    lsr TEMP
+    lsr TEMP
+    lsr TEMP
+    lsr TEMP
+    andi TEMP, 3
+
+    in TEMP2, PORTB
+    andi TEMP2, 0b11111100
+    or TEMP2, TEMP
+    out PORTB, TEMP2
+
+    cpi FILA, 0
+    breq EF0
+    cpi FILA, 1
+    breq EF1
+    cpi FILA, 2
+    breq EF2
+    cpi FILA, 3
+    breq EF3
+    cpi FILA, 4
+    breq EF4
+    cpi FILA, 5
+    breq EF5
+    cpi FILA, 6
+    breq EF6
+    rjmp EF7
+
+EF0:
+    cbi PORTB, 2
+    rjmp EF_RET
+EF1:
+    cbi PORTB, 3
+    rjmp EF_RET
+EF2:
+    cbi PORTB, 4
+    rjmp EF_RET
+EF3:
+    cbi PORTB, 5
+    rjmp EF_RET
+EF4:
+    cbi PORTC, 0
+    rjmp EF_RET
+EF5:
+    cbi PORTC, 1
+    rjmp EF_RET
+EF6:
+    cbi PORTC, 2
+    rjmp EF_RET
+EF7:
+    cbi PORTC, 3
+
+EF_RET:
+    ldi TEMP, 20
+
+ER1:
+    ldi TEMP2, 250
+
+ER2:
+    dec TEMP2
+    brne ER2
+    dec TEMP
+    brne ER1
+
+    inc FILA
+    cpi FILA, 8
+    brlo FIGURA
+
     ret
 
 APAGAR_FILAS:
@@ -225,21 +445,35 @@ APAGAR_FILAS:
     sbi PORTC, 3
     ret
 
+APAGAR:
+    rcall APAGAR_FILAS
+    clr TEMP
+    out PORTD, TEMP
+
+    in TEMP, PORTB
+    andi TEMP, 0b11111100
+    out PORTB, TEMP
+    ret
+
+MENU:
+    .db "1 - TEXTO",13,10
+    .db "2 - SONRISA",13,10
+    .db "3 - GUINO",13,10
+    .db "4 - CORAZON",13,10
+    .db "5 - CARA :3",13,10
+    .db "6 - ASTERISCO",13,10
+    .db "7 - XD",13,10,0
+
 TABLA:
     .db 0,0,0,0,0,0,0,0
-
     .db 0,0,32,64,64,64,63,0
     .db 0,0,127,73,73,73,65,0
     .db 0,0,127,73,73,73,54,0
     .db 0,0,63,64,64,64,63,0
     .db 0,0,70,73,73,73,57,0
-
     .db 0,0,0,0,0,0,0,0
-
     .db 0,0,3,4,120,4,3,0
-
     .db 0,0,0,0,0,0,0,0
-
     .db 0,0,127,2,12,2,127,0
     .db 0,0,126,9,9,9,126,0
     .db 0,0,127,9,25,41,70,0
@@ -247,18 +481,37 @@ TABLA:
     .db 0,0,127,73,73,73,65,0
     .db 0,0,127,64,64,64,64,0
     .db 0,0,62,65,65,65,62,0
-
     .db 0,0,0,0,0,0,0,0
-
     .db 0,0,127,64,64,64,64,0
     .db 0,0,62,65,65,65,62,0
-
     .db 0,0,0,0,0,0,0,0
-
     .db 0,0,127,2,12,2,127,0
     .db 0,0,127,73,73,73,65,0
     .db 0,0,32,64,64,64,63,0
     .db 0,0,62,65,65,65,62,0
     .db 0,0,127,9,25,41,70,0
-
     .db 0,0,0,0,0,0,0,0
+
+SONRISA:
+    .db 0b00111100,0b01000010,0b10100101,0b10000001
+    .db 0b10100101,0b10011001,0b01000010,0b00111100
+
+GUINO:
+    .db 0b00111100,0b01000010,0b10101101,0b10000001
+    .db 0b10100101,0b10011001,0b01000010,0b00111100
+
+CORAZON:
+    .db 0b01100110,0b11111111,0b11111111,0b11111111
+    .db 0b01111110,0b00111100,0b00011000,0b00000000
+
+CARA3:
+    .db 0b00000000,0b01100110,0b01100110,0b00000000
+    .db 0b10011001,0b10011001,0b10011001,0b01111110
+
+ASTERISCO:
+    .db 0b10010010,0b01010100,0b00111000,0b11111110
+    .db 0b00111000,0b01010100,0b10010010,0b00000000
+
+XD:
+    .db 0b00010001,0b00001010,0b00000100,0b01101010
+    .db 0b10110001,0b10100000,0b10100000,0b01100000
