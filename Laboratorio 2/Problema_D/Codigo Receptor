@@ -1,1 +1,101 @@
 
+.include "m328pdef.inc"
+
+.org 0x0000
+rjmp INICIO
+
+INICIO:
+; Salidas
+ldi r16, 0b11111100
+out DDRD, r16
+
+ldi r16, 0b00000011
+out DDRB, r16
+
+clr r16
+out PORTD, r16
+out PORTB, r16
+
+; USART 9600
+ldi r16, 103
+sts UBRR0L, r16
+ldi r16, 0
+sts UBRR0H, r16
+
+ldi r16, (1<<RXEN0)
+sts UCSR0B, r16
+
+ldi r16, (1<<UCSZ01)|(1<<UCSZ00)
+sts UCSR0C, r16
+
+MAIN:
+ESPERAR:
+lds r16, UCSR0A
+sbrs r16, RXC0
+rjmp ESPERAR
+
+lds r17, UDR0
+andi r17, 0b00000111
+
+clr r18
+out PORTD, r18
+out PORTB, r18
+
+cpi r17, 0
+breq LED0
+
+cpi r17, 1
+breq LED1
+
+
+cpi r17, 2
+breq LED2
+
+cpi r17, 3
+breq LED3
+
+cpi r17, 4
+breq LED4
+
+cpi r17, 5
+breq LED5
+
+cpi r17, 6
+breq LED6
+
+cpi r17, 7
+breq LED7
+
+rjmp MAIN
+
+LED0:
+sbi PORTD, PD2
+rjmp MAIN
+
+LED1:
+sbi PORTD, PD3
+rjmp MAIN
+
+LED2:
+sbi PORTD, PD4
+rjmp MAIN
+
+LED3:
+sbi PORTD, PD5
+rjmp MAIN
+
+LED4:
+sbi PORTD, PD6
+rjmp MAIN
+
+LED5:
+sbi PORTD, PD7
+rjmp MAIN
+
+LED6:
+sbi PORTB, PB0
+rjmp MAIN
+
+LED7:
+sbi PORTB, PB1
+rjmp MAIN
