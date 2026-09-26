@@ -1,11 +1,14 @@
 .include "m328pdef.inc"
 
-; r17 = posicion
+; r17 = posición
 ; r18 = señal
-; r19:r20 = temporales
+; r19 y r20 = temporales
 ; r21:r22 = OCR1A
 
-.equ OCR_INICIAL = 600
+.equ FRECUENCIA_INICIAL = 600
+.equ FRECUENCIA_MIN = 20
+.equ FRECUENCIA_MAX = 1000
+.equ PASO_FRECUENCIA = 10
 
 .org 0x0000
     rjmp INICIO
@@ -49,8 +52,8 @@ INICIO:
     ldi r16, (1<<WGM12) | (1<<CS11) | (1<<CS10)
     sts TCCR1B, r16
 
-    ldi r21, LOW(OCR_INICIAL)
-    ldi r22, HIGH(OCR_INICIAL)
+    ldi r21, LOW(FRECUENCIA_INICIAL)
+    ldi r22, HIGH(FRECUENCIA_INICIAL)
 
     sts OCR1AL, r21
     sts OCR1AH, r22
@@ -60,53 +63,8 @@ INICIO:
 
     sei
 
-    ldi r16, '1'
-    rcall ENVIAR
-    ldi r16, ' '
-    rcall ENVIAR
-    ldi r16, 'S'
-    rcall ENVIAR
-    ldi r16, 'e'
-    rcall ENVIAR
-    ldi r16, 'n'
-    rcall ENVIAR
-    ldi r16, 'a'
-    rcall ENVIAR
-    ldi r16, 'l'
-    rcall ENVIAR
-    ldi r16, ' '
-    rcall ENVIAR
-    ldi r16, '1'
-    rcall ENVIAR
-    ldi r16, '5'
-    rcall ENVIAR
-    ldi r16, 13
-    rcall ENVIAR
-    ldi r16, 10
-    rcall ENVIAR
-
-    ldi r16, '2'
-    rcall ENVIAR
-    ldi r16, ' '
-    rcall ENVIAR
-    ldi r16, 'S'
-    rcall ENVIAR
-    ldi r16, 'e'
-    rcall ENVIAR
-    ldi r16, 'n'
-    rcall ENVIAR
-    ldi r16, 'a'
-    rcall ENVIAR
-    ldi r16, 'l'
-    rcall ENVIAR
-    ldi r16, ' '
-    rcall ENVIAR
-    ldi r16, '9'
-    rcall ENVIAR
-    ldi r16, 13
-    rcall ENVIAR
-    ldi r16, 10
-    rcall ENVIAR
+    rcall MOSTRAR_MENU
+    rcall MOSTRAR_FRECUENCIA
 
 BUCLE:
     lds r16, UCSR0A
@@ -121,20 +79,133 @@ BUCLE:
     cpi r16, '2'
     breq SELECCION_9
 
+    cpi r16, '+'
+    breq FRECUENCIA_MAS
+
+    cpi r16, '-'
+    breq FRECUENCIA_MENOS
+
+    rjmp BUCLE
+
+FRECUENCIA_MAS:
+    cpi r22, HIGH(FRECUENCIA_MIN)
+    brne MAS_CAMBIAR
+
+    cpi r21, LOW(FRECUENCIA_MIN)
+    brlo MAS_CAMBIAR
+
+    rjmp BUCLE
+
+MAS_CAMBIAR:
+    subi r21, LOW(PASO_FRECUENCIA)
+    sbci r22, HIGH(PASO_FRECUENCIA)
+
+    cpi r22, HIGH(FRECUENCIA_MIN)
+    brlo MAS_LIMITE
+
+    brne MAS_CARGAR
+
+    cpi r21, LOW(FRECUENCIA_MIN)
+    brsh MAS_CARGAR
+
+MAS_LIMITE:
+    ldi r21, LOW(FRECUENCIA_MIN)
+    ldi r22, HIGH(FRECUENCIA_MIN)
+
+MAS_CARGAR:
+    sts OCR1AL, r21
+    sts OCR1AH, r22
+
+    rcall MOSTRAR_FRECUENCIA
+
+    rjmp BUCLE
+
+FRECUENCIA_MENOS:
+    cpi r22, HIGH(FRECUENCIA_MAX)
+    brlo MENOS_CAMBIAR
+
+    cpi r21, LOW(FRECUENCIA_MAX)
+    brlo MENOS_CAMBIAR
+
+    rjmp BUCLE
+
+MENOS_CAMBIAR:
+    subi r21, LOW(-PASO_FRECUENCIA)
+    sbci r22, HIGH(-PASO_FRECUENCIA)
+
+    cpi r22, HIGH(FRECUENCIA_MAX)
+    brlo MENOS_CARGAR
+
+    brne MENOS_LIMITE
+
+    cpi r21, LOW(FRECUENCIA_MAX)
+    brlo MENOS_CARGAR
+
+MENOS_LIMITE:
+    ldi r21, LOW(FRECUENCIA_MAX)
+    ldi r22, HIGH(FRECUENCIA_MAX)
+
+MENOS_CARGAR:
+    sts OCR1AL, r21
+    sts OCR1AH, r22
+
+    rcall MOSTRAR_FRECUENCIA
+
     rjmp BUCLE
 
 SELECCION_15:
     ldi r18, 15
     clr r17
 
+    ldi r16, 'S'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'n'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, 'l'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
     ldi r16, '1'
     rcall ENVIAR
     ldi r16, '5'
     rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, 's'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'l'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'c'
+    rcall ENVIAR
+    ldi r16, 'c'
+    rcall ENVIAR
+    ldi r16, 'i'
+    rcall ENVIAR
+    ldi r16, 'o'
+    rcall ENVIAR
+    ldi r16, 'n'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, 'd'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+
     ldi r16, 13
     rcall ENVIAR
     ldi r16, 10
     rcall ENVIAR
+
+    rcall MOSTRAR_FRECUENCIA
 
     rjmp BUCLE
 
@@ -142,14 +213,317 @@ SELECCION_9:
     ldi r18, 9
     clr r17
 
+    ldi r16, 'S'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'n'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, 'l'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
     ldi r16, '9'
     rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, 's'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'l'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'c'
+    rcall ENVIAR
+    ldi r16, 'c'
+    rcall ENVIAR
+    ldi r16, 'i'
+    rcall ENVIAR
+    ldi r16, 'o'
+    rcall ENVIAR
+    ldi r16, 'n'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, 'd'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+
     ldi r16, 13
     rcall ENVIAR
     ldi r16, 10
     rcall ENVIAR
 
+    rcall MOSTRAR_FRECUENCIA
+
     rjmp BUCLE
+
+MOSTRAR_MENU:
+    ldi r16, 13
+    rcall ENVIAR
+    ldi r16, 10
+    rcall ENVIAR
+
+    ldi r16, '1'
+    rcall ENVIAR
+    ldi r16, ')'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, 'S'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'n'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, 'l'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, '1'
+    rcall ENVIAR
+    ldi r16, '5'
+    rcall ENVIAR
+
+    ldi r16, 13
+    rcall ENVIAR
+    ldi r16, 10
+    rcall ENVIAR
+
+    ldi r16, '2'
+    rcall ENVIAR
+    ldi r16, ')'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, 'S'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'n'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, 'l'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, '9'
+    rcall ENVIAR
+
+    ldi r16, 13
+    rcall ENVIAR
+    ldi r16, 10
+    rcall ENVIAR
+
+    ldi r16, '+'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, '-'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, 'C'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, 'm'
+    rcall ENVIAR
+    ldi r16, 'b'
+    rcall ENVIAR
+    ldi r16, 'i'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, 'r'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+    ldi r16, 'f'
+    rcall ENVIAR
+    ldi r16, 'r'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'c'
+    rcall ENVIAR
+    ldi r16, 'u'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'n'
+    rcall ENVIAR
+    ldi r16, 'c'
+    rcall ENVIAR
+    ldi r16, 'i'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+
+    ldi r16, 13
+    rcall ENVIAR
+    ldi r16, 10
+    rcall ENVIAR
+    ret
+
+MOSTRAR_FRECUENCIA:
+    mov r23, r21
+    mov r24, r22
+
+    inc r23
+    brne DIVISOR_LISTO
+    inc r24
+
+DIVISOR_LISTO:
+    ldi r25, 0x48
+    ldi r26, 0xE8
+    ldi r27, 0x01
+
+    clr r30
+    clr r31
+
+DIVISION:
+    cp r25, r23
+    cpc r26, r24
+    cpc r27, r1
+    brlo FIN_DIVISION
+
+    sub r25, r23
+    sbc r26, r24
+    sbci r27, 0
+
+    inc r30
+    brne DIVISION
+
+    inc r31
+    rjmp DIVISION
+
+FIN_DIVISION:
+    ldi r16, 'F'
+    rcall ENVIAR
+    ldi r16, 'r'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'c'
+    rcall ENVIAR
+    ldi r16, 'u'
+    rcall ENVIAR
+    ldi r16, 'e'
+    rcall ENVIAR
+    ldi r16, 'n'
+    rcall ENVIAR
+    ldi r16, 'c'
+    rcall ENVIAR
+    ldi r16, 'i'
+    rcall ENVIAR
+    ldi r16, 'a'
+    rcall ENVIAR
+    ldi r16, ':'
+    rcall ENVIAR
+    ldi r16, ' '
+    rcall ENVIAR
+
+    mov r28, r30
+    mov r29, r31
+
+    clr r30
+
+MILES:
+    cpi r29, HIGH(1000)
+    brlo CENTENAS
+
+    subi r28, LOW(1000)
+    sbci r29, HIGH(1000)
+    inc r30
+    rjmp MILES
+
+CENTENAS:
+    clr r31
+
+CIENTOS:
+    cpi r28, 100
+    brlo DECENAS
+
+    subi r28, 100
+    inc r31
+    rjmp CIENTOS
+
+DECENAS:
+    clr r29
+
+DIECES:
+    cpi r28, 10
+    brlo UNIDADES
+
+    subi r28, 10
+    inc r29
+    rjmp DIECES
+
+UNIDADES:
+    cpi r30, 0
+    breq SIN_MILES
+
+    mov r16, r30
+    subi r16, -'0'
+    rcall ENVIAR
+
+SIN_MILES:
+    cpi r30, 0
+    brne MOSTRAR_CENTENAS
+
+    cpi r31, 0
+    breq SIN_CENTENAS
+
+MOSTRAR_CENTENAS:
+    mov r16, r31
+    subi r16, -'0'
+    rcall ENVIAR
+
+SIN_CENTENAS:
+    cpi r30, 0
+    brne MOSTRAR_DECENAS
+
+    cpi r31, 0
+    brne MOSTRAR_DECENAS
+
+    cpi r29, 0
+    breq SIN_DECENAS
+
+MOSTRAR_DECENAS:
+    mov r16, r29
+    subi r16, -'0'
+    rcall ENVIAR
+
+SIN_DECENAS:
+    mov r16, r28
+    subi r16, -'0'
+    rcall ENVIAR
+
+    ldi r16, ' '
+    rcall ENVIAR
+
+    ldi r16, 'H'
+    rcall ENVIAR
+
+    ldi r16, 'z'
+    rcall ENVIAR
+
+    ldi r16, 13
+    rcall ENVIAR
+
+    ldi r16, 10
+    rcall ENVIAR
+
+    ret
 
 ENVIAR:
 ESPERAR_TX:
@@ -168,17 +542,17 @@ TIMER1_COMPA:
     push r31
 
     cpi r18, 15
-    brne USAR_9
+    brne NO_LUT15
 
     ldi ZH, HIGH(LUT15*2)
     ldi ZL, LOW(LUT15*2)
-    rjmp LEER
+    rjmp LEER_LUT
 
-USAR_9:
+NO_LUT15:
     ldi ZH, HIGH(LUT9*2)
     ldi ZL, LOW(LUT9*2)
 
-LEER:
+LEER_LUT:
     add ZL, r17
 
     brcc SIN_CARRY
