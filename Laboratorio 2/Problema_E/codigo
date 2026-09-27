@@ -1,1 +1,387 @@
+.include "m328pdef.inc"
 
+; Estados
+.equ CERRADA   = 0
+.equ ABRIENDO  = 1
+.equ ABIERTA   = 2
+.equ CERRANDO  = 3
+.equ SEGURIDAD = 4
+
+.def ESTADO = r16
+.def TEMP   = r17
+.def TEMP2  = r18
+
+.org 0x0000
+    rjmp INICIO
+
+.org 0x0002
+    reti
+
+.org 0x0004
+    reti
+
+.org 0x0006
+    reti
+
+.org 0x0008
+    rjmp OBSTACULO_ISR
+
+.org 0x000A
+    reti
+
+
+INICIO:
+    ; Stack
+    ldi TEMP, high(RAMEND)
+    out SPH, TEMP
+    ldi TEMP, low(RAMEND)
+    out SPL, TEMP
+
+    ; PD1, PD4-PD7 como salidas
+    ldi TEMP, (1<<PD1)|(1<<PD4)|(1<<PD5)|(1<<PD6)|(1<<PD7)
+    out DDRD, TEMP
+
+    ; PC0-PC4 entradas con pull-up
+    ldi TEMP, 0x00
+    out DDRC, TEMP
+
+    ldi TEMP, (1<<PC0)|(1<<PC1)|(1<<PC2)|(1<<PC3)|(1<<PC4)
+    out PORTC, TEMP
+
+    ; PB0 salida
+    sbi DDRB, PB0
+
+    ; Apagar salidas
+    cbi PORTD, PD4
+    cbi PORTD, PD5
+    cbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ; USART
+    rcall USART_INIT
+
+    ; Interrupción por PC4
+    ldi TEMP, (1<<PCIE1)
+    sts PCICR, TEMP
+
+    ldi TEMP, (1<<PCINT12)
+    sts PCMSK1, TEMP
+
+    ; Empieza cerrada
+    ldi ESTADO, CERRADA
+    sbi PORTB, PB0
+
+    sei
+
+    ldi ZL, low(MSG_CERRADA*2)
+    ldi ZH, high(MSG_CERRADA*2)
+    rcall USART_STRING
+
+
+MAIN:
+    cpi ESTADO, CERRADA
+    breq IR_CERRADA
+
+    cpi ESTADO, ABRIENDO
+    breq IR_ABRIENDO
+
+    cpi ESTADO, ABIERTA
+    breq IR_ABIERTA
+
+    cpi ESTADO, CERRANDO
+    breq IR_CERRANDO
+
+    rjmp ESTADO_SEGURIDAD
+
+
+IR_CERRADA:
+    rjmp ESTADO_CERRADA
+
+IR_ABRIENDO:
+    rjmp ESTADO_ABRIENDO
+
+IR_ABIERTA:
+    rjmp ESTADO_ABIERTA
+
+IR_CERRANDO:
+    rjmp ESTADO_CERRANDO
+
+
+ESTADO_CERRADA:
+    cbi PORTD, PD4
+    cbi PORTD, PD5
+    cbi PORTD, PD6
+    cbi PORTD, PD7
+    sbi PORTB, PB0
+
+    ; Pulsador abrir
+    sbis PINC, PC0
+    rjmp COMENZAR_ABRIR
+
+    rjmp MAIN
+
+
+COMENZAR_ABRIR:
+    ldi ESTADO, ABRIENDO
+
+    sbi PORTD, PD4
+    cbi PORTD, PD5
+    sbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ldi ZL, low(MSG_ABRIENDO*2)
+    ldi ZH, high(MSG_ABRIENDO*2)
+    rcall USART_STRING
+
+    rjmp MAIN
+
+
+ESTADO_ABRIENDO:
+    sbi PORTD, PD4
+    cbi PORTD, PD5
+    sbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ; Sensor puerta abierta
+    sbis PINC, PC2
+    rjmp LLEGO_ABIERTA
+
+    rjmp MAIN
+
+
+LLEGO_ABIERTA:
+    cbi PORTD, PD4
+    cbi PORTD, PD5
+    cbi PORTD, PD6
+    sbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ldi ESTADO, ABIERTA
+
+    ldi ZL, low(MSG_ABIERTA*2)
+    ldi ZH, high(MSG_ABIERTA*2)
+    rcall USART_STRING
+
+    rjmp MAIN
+
+
+ESTADO_ABIERTA:
+    cbi PORTD, PD4
+    cbi PORTD, PD5
+    cbi PORTD, PD6
+    sbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ; Pulsador cerrar
+    sbis PINC, PC1
+    rjmp COMENZAR_CERRAR
+
+    rjmp MAIN
+
+
+COMENZAR_CERRAR:
+    ldi ESTADO, CERRANDO
+
+    cbi PORTD, PD4
+    sbi PORTD, PD5
+    sbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ldi ZL, low(MSG_CERRANDO*2)
+    ldi ZH, high(MSG_CERRANDO*2)
+    rcall USART_STRING
+
+    rjmp MAIN
+
+
+ESTADO_CERRANDO:
+    cbi PORTD, PD4
+    sbi PORTD, PD5
+    sbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ; Sensor puerta cerrada
+    sbis PINC, PC3
+    rjmp LLEGO_CERRADA
+
+    rjmp MAIN
+
+
+LLEGO_CERRADA:
+    cbi PORTD, PD4
+    cbi PORTD, PD5
+    cbi PORTD, PD6
+    cbi PORTD, PD7
+    sbi PORTB, PB0
+
+    ldi ESTADO, CERRADA
+
+    ldi ZL, low(MSG_CERRADA*2)
+    ldi ZH, high(MSG_CERRADA*2)
+    rcall USART_STRING
+
+    rjmp MAIN
+
+
+ESTADO_SEGURIDAD:
+    cbi PORTD, PD4
+    cbi PORTD, PD5
+    cbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ; Volver a abrir
+    sbis PINC, PC0
+    rjmp SEGURIDAD_ABRIR
+
+    ; Volver a cerrar
+    sbis PINC, PC1
+    rjmp SEGURIDAD_CERRAR
+
+    rjmp MAIN
+
+
+SEGURIDAD_ABRIR:
+    ldi ESTADO, ABRIENDO
+
+    sbi PORTD, PD4
+    cbi PORTD, PD5
+    sbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ldi ZL, low(MSG_ABRIENDO*2)
+    ldi ZH, high(MSG_ABRIENDO*2)
+    rcall USART_STRING
+
+    rjmp MAIN
+
+
+SEGURIDAD_CERRAR:
+    ldi ESTADO, CERRANDO
+
+    cbi PORTD, PD4
+    sbi PORTD, PD5
+    sbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ldi ZL, low(MSG_CERRANDO*2)
+    ldi ZH, high(MSG_CERRANDO*2)
+    rcall USART_STRING
+
+    rjmp MAIN
+
+
+OBSTACULO_ISR:
+    push TEMP
+    in TEMP, SREG
+    push TEMP
+
+    ; Solo actúa si la puerta se está moviendo
+    cpi ESTADO, ABRIENDO
+    breq OBSTACULO
+
+    cpi ESTADO, CERRANDO
+    breq OBSTACULO
+
+    rjmp FIN_ISR
+
+
+OBSTACULO:
+    cbi PORTD, PD4
+    cbi PORTD, PD5
+    cbi PORTD, PD6
+    cbi PORTD, PD7
+    cbi PORTB, PB0
+
+    ldi ESTADO, SEGURIDAD
+
+    ldi ZL, low(MSG_OBSTACULO*2)
+    ldi ZH, high(MSG_OBSTACULO*2)
+    rcall USART_STRING
+
+    ldi ZL, low(MSG_SEGURIDAD*2)
+    ldi ZH, high(MSG_SEGURIDAD*2)
+    rcall USART_STRING
+
+
+FIN_ISR:
+    pop TEMP
+    out SREG, TEMP
+    pop TEMP
+    reti
+
+
+USART_INIT:
+    ; 16 MHz - 9600 baud
+    ldi TEMP, high(103)
+    sts UBRR0H, TEMP
+
+    ldi TEMP, low(103)
+    sts UBRR0L, TEMP
+
+    ; Habilitar TX
+    ldi TEMP, (1<<TXEN0)
+    sts UCSR0B, TEMP
+
+    ; 8 bits, 1 stop, sin paridad
+    ldi TEMP, (1<<UCSZ01)|(1<<UCSZ00)
+    sts UCSR0C, TEMP
+
+    ret
+
+
+USART_TX:
+ESPERAR_TX:
+    lds TEMP2, UCSR0A
+    sbrs TEMP2, UDRE0
+    rjmp ESPERAR_TX
+
+    sts UDR0, TEMP
+    ret
+
+
+USART_STRING:
+    lpm TEMP, Z+
+
+    cpi TEMP, 0
+    breq FIN_STRING
+
+    rcall USART_TX
+    rjmp USART_STRING
+
+FIN_STRING:
+    ret
+
+
+.cseg
+
+.align 2
+MSG_ABRIENDO:
+    .db "Puerta abriendo",13,10,0
+
+.align 2
+MSG_ABIERTA:
+    .db "Puerta abierta",13,10,0
+
+.align 2
+MSG_CERRANDO:
+    .db "Puerta cerrando",13,10,0
+
+.align 2
+MSG_CERRADA:
+    .db "Puerta cerrada",13,10,0
+
+.align 2
+MSG_OBSTACULO:
+    .db "Obstaculo detectado",13,10,0
+
+.align 2
+MSG_SEGURIDAD:
+    .db "Movimiento detenido por seguridad",13,10,0
