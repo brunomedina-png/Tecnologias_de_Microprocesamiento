@@ -1,1 +1,231 @@
+#define F_CPU 16000000UL
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+#define BAUD            9600UL
+#define UBRR_VAL        ((F_CPU / 16UL / BAUD) - 1)
+
+#define CANAL_LDR       1
+#define CANAL_POT       2
+
+#define PIN_IN1         PB0
+#define PIN_IN2         PB1
+#define PIN_PWM         PD6
+
+#define ZONA_MUERTA     15
+#define ERROR_MAXIMO    300
+#define PWM_MINIMO      70
+#define PWM_MAXIMO      255
+
+#define POT_TOPE_ABRIR  980
+#define POT_TOPE_CERRAR 40
+
+#define RX_TIMEOUT_TICKS 2
+
+typedef enum { GIRO_DET = 0, GIRO_H, GIRO_AH } giro_t;
+
+static volatile bool     tick_100ms  = false;
+static volatile bool     rx_nuevo    = false;
+static volatile uint16_t rx_valor    = 0;
+static volatile uint16_t rx_acum     = 0;
+static volatile uint8_t  rx_digitos  = 0;
+static volatile uint8_t  rx_espera   = 0;
+
+static uint16_t setpoint = 512;
+
+static void uart_init(void)
+{
+    UBRR0H = (uint8_t)(UBRR_VAL >> 8);
+    UBRR0L = (uint8_t)(UBRR_VAL);
+    UCSR0A = 0;
+    UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);
+    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+
+static void uart_putc(char c)
+{
+    while (!(UCSR0A & (1 << UDRE0)));
+    UDR0 = c;
+}
+
+static void uart_puts(const char *s)
+{
+    while (*s) uart_putc(*s++);
+}
+
+static void uart_putu(uint16_t v)
+{
+    char    tmp[5];
+    uint8_t n = 0;
+
+    if (v == 0) { uart_putc('0'); return; }
+    while (v > 0) { tmp[n++] = '0' + (v % 10); v /= 10; }
+    while (n > 0) uart_putc(tmp[--n]);
+}
+
+static inline void rx_cerrar_numero(void)
+{
+    if (rx_acum > 1023) rx_acum = 1023;
+    rx_valor   = rx_acum;
+    rx_nuevo   = true;
+    rx_acum    = 0;
+    rx_digitos = 0;
+    rx_espera  = 0;
+}
+
+ISR(USART_RX_vect)
+{
+    char c = UDR0;
+
+    if (c >= '0' && c <= '9') {
+        if (rx_digitos < 4) {
+            rx_acum = (uint16_t)(rx_acum * 10 + (c - '0'));
+            rx_digitos++;
+        }
+        rx_espera = 0;
+    } else if (rx_digitos > 0) {
+        rx_cerrar_numero();
+    }
+}
+
+static void timer1_init(void)
+{
+    TCCR1A = 0;
+    TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10);
+    OCR1A  = (F_CPU / 64UL / 10UL) - 1;
+    TIMSK1 = (1 << OCIE1A);
+}
+
+ISR(TIMER1_COMPA_vect)
+{
+    tick_100ms = true;
+
+    if (rx_digitos > 0) {
+        rx_espera++;
+        if (rx_espera >= RX_TIMEOUT_TICKS) rx_cerrar_numero();
+    }
+}
+
+static void adc_init(void)
+{
+    ADMUX  = (1 << REFS0);
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+}
+
+static uint16_t adc_leer(uint8_t canal)
+{
+    uint16_t suma = 0;
+
+    ADMUX = (1 << REFS0) | (canal & 0x0F);
+    for (uint8_t i = 0; i < 5; i++) {
+        ADCSRA |= (1 << ADSC);
+        while (ADCSRA & (1 << ADSC));
+        if (i > 0) suma += ADC;
+    }
+    return suma >> 2;
+}
+
+static void motor_init(void)
+{
+    DDRD |= (1 << PIN_PWM);
+    DDRB |= (1 << PIN_IN1) | (1 << PIN_IN2);
+
+    TCCR0A = (1 << COM0A1) | (1 << WGM01) | (1 << WGM00);
+    TCCR0B = (1 << CS01) | (1 << CS00);
+    OCR0A  = 0;
+}
+
+static void motor_mover(giro_t g, uint8_t pwm)
+{
+    if (g == GIRO_H) {
+        PORTB |=  (1 << PIN_IN1);
+        PORTB &= ~(1 << PIN_IN2);
+    } else if (g == GIRO_AH) {
+        PORTB &= ~(1 << PIN_IN1);
+        PORTB |=  (1 << PIN_IN2);
+    } else {
+        PORTB &= ~((1 << PIN_IN1) | (1 << PIN_IN2));
+        pwm = 0;
+    }
+    OCR0A = pwm;
+}
+
+static void calcular_accion(uint16_t ldr, uint16_t pot, giro_t *g, uint8_t *pwm)
+{
+    int16_t  error = (int16_t)setpoint - (int16_t)ldr;
+    uint16_t mag   = (error >= 0) ? (uint16_t)error : (uint16_t)(-error);
+
+    if (mag <= ZONA_MUERTA) {
+        *g = GIRO_DET;
+        *pwm = 0;
+        return;
+    }
+
+    *g = (error > 0) ? GIRO_H : GIRO_AH;
+
+    uint16_t exceso = mag - ZONA_MUERTA;
+    if (exceso > ERROR_MAXIMO) exceso = ERROR_MAXIMO;
+    *pwm = (uint8_t)(PWM_MINIMO +
+           ((uint32_t)exceso * (PWM_MAXIMO - PWM_MINIMO)) / ERROR_MAXIMO);
+
+    if ((*g == GIRO_H  && pot >= POT_TOPE_ABRIR) ||
+        (*g == GIRO_AH && pot <= POT_TOPE_CERRAR)) {
+        *g = GIRO_DET;
+        *pwm = 0;
+    }
+}
+
+static void enviar_estado(uint16_t ldr, uint16_t pot, giro_t g, uint8_t pwm)
+{
+    uart_puts("SP:");   uart_putu(setpoint);
+    uart_puts(",LDR:"); uart_putu(ldr);
+    uart_puts(",POT:"); uart_putu(pot);
+    uart_puts(",PWM:"); uart_putu(pwm);
+    uart_puts(",DIR:");
+    uart_puts(g == GIRO_H ? "H" : (g == GIRO_AH ? "AH" : "DET"));
+    uart_puts("\r\n");
+}
+
+int main(void)
+{
+    uart_init();
+    adc_init();
+    motor_init();
+    timer1_init();
+    sei();
+
+    uart_puts("# Problema B listo. Envie un setpoint 0..1023\r\n");
+
+    while (1) {
+
+        if (rx_nuevo) {
+            cli();
+            setpoint = rx_valor;
+            rx_nuevo = false;
+            sei();
+
+            uart_puts("# SP recibido: ");
+            uart_putu(setpoint);
+            uart_puts("\r\n");
+        }
+
+        if (tick_100ms) {
+            tick_100ms = false;
+
+            uint16_t ldr = adc_leer(CANAL_LDR);
+            uint16_t pot = adc_leer(CANAL_POT);
+            giro_t   giro;
+            uint8_t  pwm;
+
+            calcular_accion(ldr, pot, &giro, &pwm);
+            motor_mover(giro, pwm);
+            enviar_estado(ldr, pot, giro, pwm);
+        }
+    }
+}
+
+
 
