@@ -1,1 +1,373 @@
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+#include <stdio.h>
+#include <string.h>
 
+// --- DIRECCIÓN DE LCD I2C
+#define LCD_I2C_ADDR  (0x27 << 1) 
+#define LCD_BACKLIGHT 0x08
+#define ENABLE        0x04
+#define RS            0x01
+
+// FRECUENCIAS PREDERTERMINADAS 
+#define NOTE_C4  262  // Do
+#define NOTE_D4  294  // Re
+#define NOTE_E4  330  // Mi
+#define NOTE_F4  349  // Fa
+#define NOTE_G4  392  // Sol
+#define NOTE_A4  440  // La
+#define NOTE_B4  494  // Si
+#define NOTE_C5  523  // Do agudo
+
+const char* nombres_notas[] = {"Do", "Re", "Mi", "Fa", "Sol", "La", "Si", "Do+"};
+const uint16_t frecs_notas[] = {NOTE_C4, NOTE_D4, NOTE_E4, NOTE_F4, NOTE_G4, NOTE_A4, NOTE_B4, NOTE_C5};
+
+#define MODO_PIANO   0
+#define MODO_CANCION 1
+
+volatile uint8_t modo_actual = MODO_PIANO;
+volatile char cmd_uart[8];
+volatile uint8_t cmd_listo = 0;
+volatile uint8_t idx_buf = 0;
+
+typedef struct {
+	uint16_t melodia;
+	uint16_t bajo;
+	uint16_t duracion_ms;
+} NotaCancion;
+
+// CANCIONES PREDETERMINADAS
+
+// C1: María tenía un corderito
+const NotaCancion cancion1[] = {
+	{NOTE_E4, NOTE_C4, 400}, {NOTE_D4, NOTE_C4, 400}, {NOTE_C4, NOTE_C4, 400}, {NOTE_D4, NOTE_C4, 400},
+	{NOTE_E4, NOTE_C4, 400}, {NOTE_E4, NOTE_C4, 400}, {NOTE_E4, NOTE_C4, 800},
+	{NOTE_D4, NOTE_G4, 400}, {NOTE_D4, NOTE_G4, 400}, {NOTE_D4, NOTE_G4, 800},
+	{NOTE_E4, NOTE_C4, 400}, {NOTE_G4, NOTE_C4, 400}, {NOTE_G4, NOTE_C4, 800},
+	{NOTE_E4, NOTE_C4, 400}, {NOTE_D4, NOTE_C4, 400}, {NOTE_C4, NOTE_C4, 400}, {NOTE_D4, NOTE_C4, 400},
+	{NOTE_E4, NOTE_C4, 400}, {NOTE_E4, NOTE_C4, 400}, {NOTE_E4, NOTE_C4, 400}, {NOTE_E4, NOTE_C4, 400},
+	{NOTE_D4, NOTE_G4, 400}, {NOTE_D4, NOTE_G4, 400}, {NOTE_E4, NOTE_C4, 400}, {NOTE_D4, NOTE_G4, 400},
+	{NOTE_C4, NOTE_C4, 800},
+	{0, 0, 0}
+};
+
+// C2: Los pollitos dicen
+const NotaCancion cancion2[] = {
+	{NOTE_C4, NOTE_C4, 300}, {NOTE_D4, NOTE_C4, 300}, {NOTE_E4, NOTE_C4, 300}, {NOTE_F4, NOTE_F4, 300},
+	{NOTE_G4, NOTE_C4, 600}, {NOTE_G4, NOTE_C4, 600},
+	{NOTE_A4, NOTE_F4, 300}, {NOTE_A4, NOTE_F4, 300}, {NOTE_A4, NOTE_F4, 300}, {NOTE_A4, NOTE_F4, 300},
+	{NOTE_G4, NOTE_C4, 600}, {NOTE_G4, NOTE_C4, 600},
+	{NOTE_F4, NOTE_F4, 300}, {NOTE_F4, NOTE_F4, 300}, {NOTE_F4, NOTE_F4, 300}, {NOTE_F4, NOTE_F4, 300},
+	{NOTE_E4, NOTE_C4, 600}, {NOTE_E4, NOTE_C4, 600},
+	{NOTE_D4, NOTE_G4, 300}, {NOTE_D4, NOTE_G4, 300}, {NOTE_D4, NOTE_G4, 300}, {NOTE_D4, NOTE_G4, 300},
+	{NOTE_C4, NOTE_C4, 600}, {NOTE_C4, NOTE_C4, 600},
+	{0, 0, 0}
+};
+
+// C3: Bella Ciao 
+const NotaCancion cancion3[] = {
+	// U-na ma-ti-na, mi so-no al-za-to
+	{NOTE_E4, NOTE_C4, 250}, {NOTE_A4, NOTE_F4, 250}, {NOTE_B4, NOTE_G4, 250}, {NOTE_C5, NOTE_C4, 250}, {NOTE_A4, NOTE_F4, 500},
+	// O bel-la ciao, bel-la ciao
+	{NOTE_E4, NOTE_C4, 250}, {NOTE_A4, NOTE_F4, 250}, {NOTE_B4, NOTE_G4, 250}, {NOTE_C5, NOTE_C4, 250}, {NOTE_A4, NOTE_F4, 500},
+	// Bel-la ciao, ciao, ciao!
+	{NOTE_E4, NOTE_C4, 250}, {NOTE_A4, NOTE_F4, 250}, {NOTE_B4, NOTE_G4, 250}, {NOTE_C5, NOTE_C4, 250},
+	{NOTE_B4, NOTE_G4, 250}, {NOTE_A4, NOTE_F4, 250}, {NOTE_C5, NOTE_C4, 250}, {NOTE_B4, NOTE_G4, 250}, {NOTE_A4, NOTE_F4, 600},
+	{0, 0, 0}
+};
+
+// DRIVER I2C
+void i2c_init(void) {
+	TWSR = 0x00;
+	TWBR = 72; // SCL = 100 kHz
+}
+
+uint8_t i2c_start(void) {
+	TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
+	uint16_t timeout = 10000;
+	while (!(TWCR & (1 << TWINT))) {
+		if (--timeout == 0) return 0;
+	}
+	return 1;
+}
+
+void i2c_D(void) {
+	TWCR = (1 << TWINT) | (1 << TWSTO) | (1 << TWEN);
+}
+
+uint8_t i2c_write(uint8_t data) {
+	TWDR = data;
+	TWCR = (1 << TWINT) | (1 << TWEN);
+	uint16_t timeout = 10000;
+	while (!(TWCR & (1 << TWINT))) {
+		if (--timeout == 0) return 0;
+	}
+	return 1;
+}
+
+void lcd_i2c_send(uint8_t data) {
+	if (i2c_start()) {
+		i2c_write(LCD_I2C_ADDR);
+		i2c_write(data | LCD_BACKLIGHT);
+		i2c_D();
+	}
+}
+
+void lcd_pulse(uint8_t data) {
+	lcd_i2c_send(data | ENABLE);
+	_delay_us(1);
+	lcd_i2c_send(data & ~ENABLE);
+	_delay_us(50);
+}
+
+void lcd_send_nibble(uint8_t nibble, uint8_t mode) {
+	uint8_t data = (nibble & 0xF0) | mode;
+	lcd_pulse(data);
+}
+
+void lcd_cmd(uint8_t cmd) {
+	lcd_send_nibble(cmd & 0xF0, 0);
+	lcd_send_nibble((cmd << 4) & 0xF0, 0);
+	if (cmd == 0x01 || cmd == 0x02) _delay_ms(2);
+}
+
+void lcd_char(uint8_t data) {
+	lcd_send_nibble(data & 0xF0, RS);
+	lcd_send_nibble((data << 4) & 0xF0, RS);
+}
+
+void lcd_init(void) {
+	i2c_init();
+	_delay_ms(50);
+	lcd_send_nibble(0x30, 0); _delay_ms(5);
+	lcd_send_nibble(0x30, 0); _delay_us(150);
+	lcd_send_nibble(0x30, 0);
+	lcd_send_nibble(0x20, 0);
+	lcd_cmd(0x28);
+	lcd_cmd(0x0C);
+	lcd_cmd(0x06);
+	lcd_cmd(0x01);
+	_delay_ms(2);
+}
+
+void lcd_print(const char* str) {
+	while (*str) lcd_char(*str++);
+}
+
+void lcd_gotoxy(uint8_t col, uint8_t fila) {
+	lcd_cmd((fila == 0 ? 0x80 : 0xC0) + col);
+}
+
+// GENERACION DE TONOS CON TIMERS
+void init_timers(void) {
+	// Timer 1 (PB1 / D9) -> Buzzer 1 (Melodía)
+	DDRB |= (1 << PB1);
+	TCCR1A = 0;
+	TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // Prescaler 64 CONFIGURADO CON CLEAR TIMER OF COMPARE MATCH
+
+	// Timer 2 (PD3 / D3) -> Buzzer 2 (Bajo)
+	DDRD |= (1 << PD3);
+	TCCR2A = (1 << WGM21); // Modo CTC
+	TCCR2B = (1 << CS22) | (1 << CS21); // Prescaler 255 PARA EVITAR DESBORDAMIENTO EN REGISTRO 8 BITS
+}
+
+void set_tone_melodia(uint16_t freq) {
+	if (freq == 0) {
+		TCCR1A &= ~(1 << COM1A0);
+		PORTB &= ~(1 << PB1);
+		} else {
+		TCCR1A |= (1 << COM1A0);
+		OCR1A = (uint16_t)((125000UL / freq) - 1);
+	}
+}
+
+void set_tone_bajo(uint16_t freq) {
+	if (freq == 0) {
+		TCCR2A &= ~(1 << COM2B0);
+		PORTD &= ~(1 << PD3);
+		} else {
+		uint32_t val = (31250UL / freq) - 1;
+		if (val > 255) val = 255;
+		OCR2A = (uint8_t)val;
+		OCR2B = (uint8_t)val;
+		TCCR2A |= (1 << COM2B0);
+	}
+}
+
+void detener_sonido(void) {
+	set_tone_melodia(0);
+	set_tone_bajo(0);
+}
+
+// COMUNICACIÓN UART
+void uart_init(uint16_t baud) {
+	uint16_t ubrr = F_CPU / 16 / baud - 1;
+	UBRR0H = (uint8_t)(ubrr >> 8);
+	UBRR0L = (uint8_t)ubrr;
+	UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);
+	UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+
+void uart_send_string(const char* s) {
+	while (*s) {
+		while (!(UCSR0A & (1 << UDRE0)));
+		UDR0 = *s++;
+	}
+}
+
+ISR(USART_RX_vect) {       // INTERRUPCION CUANDO LLEGA UN BYTE POR EL PUERTO SERIAL 
+	char c = UDR0;			
+	if (c == '\r' || c == '\n') {
+		cmd_uart[idx_buf] = '\0';		//GUARDA COMANDOS RECIBIDOS
+		if (idx_buf > 0) {
+			cmd_listo = 1;
+		}
+		idx_buf = 0;
+		} else if (idx_buf < sizeof(cmd_uart) - 1) {
+		cmd_uart[idx_buf++] = c;
+	}
+}
+
+// PULSADORES 
+void init_pulsadores(void) {			// ENTRDAS CON PULL UP INTERNAS 
+	DDRC &= ~(0x0F); PORTC |= 0x0F;                       
+	DDRD &= ~((1 << PD2) | (1 << PD4)); PORTD |= (1 << PD2) | (1 << PD4); 
+	DDRB &= ~((1 << PB0) | (1 << PB4)); PORTB |= (1 << PB0) | (1 << PB4); 
+}
+
+int8_t obtener_nota_pulsada(void) {
+	if (!(PINC & (1 << PC0))) return 0;
+	if (!(PINC & (1 << PC1))) return 1;
+	if (!(PINC & (1 << PC2))) return 2;
+	if (!(PINC & (1 << PC3))) return 3;
+	if (!(PIND & (1 << PD2))) return 4;
+	if (!(PIND & (1 << PD4))) return 5;
+	if (!(PINB & (1 << PB0))) return 6;
+	if (!(PINB & (1 << PB4))) return 7;
+	return -1;
+}
+
+//REPRODUCCIÓN DE CANCIONES
+// RECORRE EL ARREGLO DE LA CACNCION SELECCIONADA Y ACTUALIZA AMBOS TIMERS CON FRECUENCIAS CORRESPONDIENTES 
+void reproducir_cancion(const NotaCancion* cancion, const char* titulo) {
+	modo_actual = MODO_CANCION;
+	lcd_cmd(0x01);
+	lcd_gotoxy(0, 0);
+	lcd_print("Cancion:");
+	lcd_gotoxy(0, 1);
+	lcd_print(titulo);
+
+	uart_send_string("Reproduciendo: ");
+	uart_send_string(titulo);
+	uart_send_string("\r\n");
+
+	uint8_t i = 0;
+	while (cancion[i].duracion_ms > 0) {
+		if (cmd_listo) {
+			if (strcmp((char*)cmd_uart, "P") == 0 || strcmp((char*)cmd_uart, "D") == 0) {
+				cmd_listo = 0;
+				uart_send_string("Cancion detenida.\r\n");
+				break;
+				} else if (strncmp((char*)cmd_uart, "C", 1) == 0) {
+				break;
+			}
+			cmd_listo = 0;
+		}
+
+		set_tone_melodia(cancion[i].melodia);
+		set_tone_bajo(cancion[i].bajo);
+
+		uint16_t dur_sonido = (cancion[i].duracion_ms * 3) / 4;
+		uint16_t dur_silencio = cancion[i].duracion_ms - dur_sonido;
+
+		while (dur_sonido > 0) {
+			_delay_ms(10);
+			dur_sonido = (dur_sonido > 10) ? dur_sonido - 10 : 0;
+		}
+
+		detener_sonido();
+		while (dur_silencio > 0) {
+			_delay_ms(10);
+			dur_silencio = (dur_silencio > 10) ? dur_silencio - 10 : 0;
+		}
+		i++;
+	}
+
+	detener_sonido();
+	if (!cmd_listo) {
+		modo_actual = MODO_PIANO;
+		lcd_cmd(0x01);
+		lcd_gotoxy(0, 0);
+		lcd_print("Modo: Piano");
+	}
+}
+
+// --- BUCLE PRINCIPAL ---
+int main(void) {
+	init_pulsadores();
+	init_timers();
+	uart_init(9600);
+	sei();
+	lcd_init();
+
+	lcd_gotoxy(0, 0);
+	lcd_print("Piano ATmega328P");
+	lcd_gotoxy(0, 1);
+	lcd_print("Modo: Listo");
+	_delay_ms(1500);
+
+	lcd_cmd(0x01);
+	lcd_gotoxy(0, 0);
+	lcd_print("Modo: Piano");
+
+	int8_t ultima_nota = -2;
+
+	while (1) {
+		if (cmd_listo) {
+			cmd_listo = 0;
+			if (strcmp((char*)cmd_uart, "C1") == 0) {
+				reproducir_cancion(cancion1, "Maria Corderito");
+				} else if (strcmp((char*)cmd_uart, "C2") == 0) {
+				reproducir_cancion(cancion2, "Pollitos Dicen");
+				} else if (strcmp((char*)cmd_uart, "C3") == 0) {
+				reproducir_cancion(cancion3, "Bella Ciao");
+				} else if (strcmp((char*)cmd_uart, "P") == 0 || strcmp((char*)cmd_uart, "D") == 0) {
+				modo_actual = MODO_PIANO;
+				detener_sonido();
+				lcd_cmd(0x01);
+				lcd_gotoxy(0, 0);
+				lcd_print("Modo: Piano");
+				uart_send_string("Modo Piano Activo\r\n");
+			}
+		}
+
+		if (modo_actual == MODO_PIANO) {
+			int8_t nota = obtener_nota_pulsada();
+
+			if (nota != ultima_nota) {
+				if (nota >= 0) {
+					set_tone_melodia(frecs_notas[nota]);
+					set_tone_bajo(frecs_notas[nota]);
+
+					lcd_gotoxy(0, 1);
+					lcd_print("Nota: ");
+					lcd_print(nombres_notas[nota]);
+					lcd_print("   ");
+
+					uart_send_string("Nota: ");
+					uart_send_string(nombres_notas[nota]);
+					uart_send_string("\r\n");
+					} else {
+					detener_sonido();
+					lcd_gotoxy(0, 1);
+					lcd_print("Sin presionar  ");
+				}
+				ultima_nota = nota;
+			}
+		}
+		_delay_ms(20);
+	}
+	return 0;
+}
