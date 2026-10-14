@@ -1,1 +1,595 @@
 
+#define F_CPU 16000000UL
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include <stdint.h>
+#include <stdio.h>
+
+// Librerias existentes del proyecto
+#include "twi.h"
+#include "twi_lcd.h"
+
+
+#define DHT_PIN          PD2
+#define CALEFACTOR       PB0
+
+// Driver L298N
+#define MOTOR_ENA        PD6     // OC0A
+#define MOTOR_IN1        PD7
+#define MOTOR_IN2        PD5
+
+#define TEMP_MAX_DHT11   50
+
+// Punto medio inicial
+uint8_t punto_medio = 20;
+
+
+
+// Tiempo maximo aproximado de espera en los bucles
+#define DHT_TIMEOUT_US   100
+
+// Intervalo entre mediciones
+#define INTERVALO_MS     5000
+
+
+
+// Espera un estado logico en el pin del sensor.
+// Devuelve 1 si lo encuentra y 0 si vence el timeout.
+
+uint8_t DHT_esperar_estado(uint8_t estado)
+{
+	uint16_t tiempo = 0;
+
+	while (((PIND & (1 << DHT_PIN)) != 0) != estado)
+	{
+		if (tiempo >= DHT_TIMEOUT_US)
+		{
+			return 0;
+		}
+
+		_delay_us(1);
+		tiempo++;
+	}
+
+	return 1;
+}
+
+// Envia la señal de inicio al DHT11.
+
+void DHT_start(void)
+{
+	// Llevar la linea a nivel bajo
+	DDRD |= (1 << DHT_PIN);
+	PORTD &= ~(1 << DHT_PIN);
+
+	// El DHT11 necesita al menos 18 ms
+	_delay_ms(20);
+
+	// Liberar la linea
+	PORTD |= (1 << DHT_PIN);
+	DDRD &= ~(1 << DHT_PIN);
+
+	// Esperar el tiempo de respuesta
+	_delay_us(30);
+}
+
+// Comprueba la respuesta inicial del sensor.
+
+uint8_t DHT_respuesta(void)
+{
+	// El sensor responde con un pulso bajo,
+	// seguido de un pulso alto.
+
+	if (!DHT_esperar_estado(0))
+	{
+		return 0;
+	}
+
+	if (!DHT_esperar_estado(1))
+	{
+		return 0;
+	}
+
+	if (!DHT_esperar_estado(0))
+	{
+		return 0;
+	}
+
+	return 1;
+}
+
+// Lee un bit del DHT11.
+// El bit se determina midiendo la duracion del nivel alto.
+
+uint8_t DHT_leer_bit(uint8_t *bit)
+{
+	uint16_t duracion = 0;
+
+	// Esperar a que termine el nivel bajo
+	if (!DHT_esperar_estado(1))
+	{
+		return 0;
+	}
+
+	// Medir la duracion del nivel alto
+	while (PIND & (1 << DHT_PIN))
+	{
+		if (duracion >= DHT_TIMEOUT_US)
+		{
+			return 0;
+		}
+
+		_delay_us(1);
+		duracion++;
+	}
+
+	// El nivel alto de un bit 1 dura aproximadamente
+	// 70 us. El de un bit 0 dura aproximadamente 26-28 us.
+	//
+	// El umbral de 40 us permite distinguirlos.
+
+	if (duracion > 40)
+	{
+		*bit = 1;
+	}
+	else
+	{
+		*bit = 0;
+	}
+
+	return 1;
+}
+
+// Lee un byte completo, de bit mas significativo a menos
+// significativo.
+
+uint8_t DHT_leer_byte(uint8_t *byte_salida)
+{
+	uint8_t resultado = 0;
+	uint8_t bit;
+	uint8_t i;
+
+	for (i = 0; i < 8; i++)
+	{
+		if (!DHT_leer_bit(&bit))
+		{
+			return 0;
+		}
+
+		resultado <<= 1;
+		resultado |= bit;
+	}
+
+	*byte_salida = resultado;
+
+	return 1;
+}
+
+// Lee la temperatura y verifica el checksum.
+//
+// El DHT11 envia cinco bytes:
+// humedad entera, humedad decimal,
+// temperatura entera, temperatura decimal y checksum.
+
+uint8_t DHT_leer_temperatura(uint8_t *temperatura)
+{
+	uint8_t hum_i;
+	uint8_t hum_d;
+	uint8_t temp_i;
+	uint8_t temp_d;
+	uint8_t checksum;
+
+	DHT_start();
+
+	if (!DHT_respuesta())
+	{
+		return 0;
+	}
+
+	if (!DHT_leer_byte(&hum_i))
+	{
+		return 0;
+	}
+
+	if (!DHT_leer_byte(&hum_d))
+	{
+		return 0;
+	}
+
+	if (!DHT_leer_byte(&temp_i))
+	{
+		return 0;
+	}
+
+	if (!DHT_leer_byte(&temp_d))
+	{
+		return 0;
+	}
+
+	if (!DHT_leer_byte(&checksum))
+	{
+		return 0;
+	}
+
+	// Validar checksum de los cuatro primeros bytes
+	if ((uint8_t)(hum_i + hum_d + temp_i + temp_d) != checksum)
+	{
+		return 0;
+	}
+
+	// Para este sistema se trabaja con temperaturas positivas.
+	// Se rechazan valores fuera del rango nominal del DHT11.
+	if (temp_i > TEMP_MAX_DHT11)
+	{
+		return 0;
+	}
+
+	*temperatura = temp_i;
+
+	return 1;
+}
+
+
+
+void USART_init(void)
+{
+	// 9600 baudios con F_CPU = 16 MHz
+	UBRR0H = 0;
+	UBRR0L = 103;
+
+	// Habilitar recepcion y transmision
+	UCSR0B = (1 << RXEN0) | (1 << TXEN0);
+
+	// Formato 8N1
+	UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+
+// Transmite una cadena de caracteres.
+
+void USART_enviar_texto(const char *texto)
+{
+	while (*texto)
+	{
+		while (!(UCSR0A & (1 << UDRE0)))
+		{
+			// Esperar a que el registro este disponible
+		}
+
+		UDR0 = *texto++;
+	}
+}
+
+// Recibe un caracter si hay alguno disponible.
+
+uint8_t USART_recibir(char *dato)
+{
+	if (UCSR0A & (1 << RXC0))
+	{
+		*dato = UDR0;
+		return 1;
+	}
+
+	return 0;
+}
+
+
+
+void Hardware_init(void)
+{
+	// Calefactor como salida
+	DDRB |= (1 << CALEFACTOR);
+	PORTB &= ~(1 << CALEFACTOR);
+
+	// DHT11 como entrada con pull-up
+	DDRD &= ~(1 << DHT_PIN);
+	PORTD |= (1 << DHT_PIN);
+
+	// Salidas del L298N
+	DDRD |= (1 << MOTOR_ENA) |
+	(1 << MOTOR_IN1) |
+	(1 << MOTOR_IN2);
+
+	// Motor inicialmente detenido
+	PORTD &= ~((1 << MOTOR_IN1) |
+	(1 << MOTOR_IN2));
+
+	// Timer0: Fast PWM, salida OC0A no invertida.
+	// Prescaler 64.
+	// Frecuencia aproximada: 976,56 Hz.
+
+	TCCR0A = (1 << COM0A1) |
+	(1 << WGM01) |
+	(1 << WGM00);
+
+	TCCR0B = (1 << CS01) |
+	(1 << CS00);
+
+	OCR0A = 0;
+}
+
+// Control de velocidad del ventilador.
+//
+// 0   = apagado
+// 85  = aproximadamente 33 %
+// 170 = aproximadamente 67 %
+// 255 = aproximadamente 100 %
+
+void set_ventilador_velocidad(uint8_t duty)
+{
+	if (duty == 0)
+	{
+		OCR0A = 0;
+
+		PORTD &= ~((1 << MOTOR_IN1) |
+		(1 << MOTOR_IN2));
+	}
+	else
+	{
+		PORTD |= (1 << MOTOR_IN1);
+		PORTD &= ~(1 << MOTOR_IN2);
+
+		OCR0A = duty;
+	}
+}
+
+// Apaga las dos salidas de control.
+
+void salidas_seguras(void)
+{
+	PORTB &= ~(1 << CALEFACTOR);
+
+	set_ventilador_velocidad(0);
+}
+
+
+
+// El umbral superior de ventilacion alta es:
+//
+// punto_medio + 26
+//
+// Se rechaza un incremento si ese umbral alcanza
+// o supera los 50 grados Celsius.
+
+void ajustar_punto_medio(char tecla)
+{
+	uint8_t pm_nuevo;
+
+	if (tecla == '+')
+	{
+		pm_nuevo = punto_medio + 1;
+
+		if ((uint16_t)pm_nuevo + 26 >= TEMP_MAX_DHT11)
+		{
+			USART_enviar_texto(
+			"\r\n[ALERTA] Cambio rechazado.\r\n"
+			"El umbral superior alcanzaria 50 C.\r\n"
+			);
+
+			return;
+		}
+
+		punto_medio = pm_nuevo;
+
+		USART_enviar_texto("\r\nPunto medio aumentado: ");
+	}
+	else if (tecla == '-')
+	{
+		// Evitar un punto medio demasiado bajo
+		if (punto_medio <= 10)
+		{
+			USART_enviar_texto(
+			"\r\nNo se puede bajar mas el punto medio.\r\n"
+			);
+
+			return;
+		}
+
+		punto_medio--;
+
+		USART_enviar_texto("\r\nPunto medio disminuido: ");
+	}
+	else
+	{
+		return;
+	}
+
+	char buffer[16];
+
+	snprintf(buffer, sizeof(buffer), "%u C\r\n", punto_medio);
+
+	USART_enviar_texto(buffer);
+}
+
+
+const char *control_temperatura(uint8_t temp)
+{
+	uint8_t lim_inf = punto_medio - 4;
+	uint8_t lim_sup = punto_medio + 5;
+
+	// Menor que el limite inferior:
+	// calefactor encendido, ventilador apagado.
+
+	if (temp < lim_inf)
+	{
+		PORTB |= (1 << CALEFACTOR);
+
+		set_ventilador_velocidad(0);
+
+		return "Calefactor ENCENDIDO";
+	}
+
+	// Zona ideal: punto medio - 4 hasta punto medio + 5.
+
+	if (temp <= lim_sup)
+	{
+		salidas_seguras();
+
+		return "Zona ideal";
+	}
+
+	// Temperaturas superiores a la zona ideal.
+	// El calefactor debe permanecer apagado.
+
+	PORTB &= ~(1 << CALEFACTOR);
+
+	// Ventilador a velocidad baja
+
+	if (temp <= (uint16_t)lim_sup + 10)
+	{
+		set_ventilador_velocidad(85);
+
+		return "Ventilador BAJA";
+	}
+
+	// Ventilador a velocidad media
+
+	if (temp <= (uint16_t)lim_sup + 20)
+	{
+		set_ventilador_velocidad(170);
+
+		return "Ventilador MEDIA";
+	}
+
+	// Ventilador a velocidad alta
+
+	set_ventilador_velocidad(255);
+
+	return "Ventilador ALTA";
+}
+
+
+void LCD_actualizar(uint8_t temp)
+{
+	char buffer_lcd[17];
+
+	// Primera fila: temperatura actual
+	twi_lcd_cmd(0x80);
+
+	snprintf(buffer_lcd, sizeof(buffer_lcd),
+	"Temp: %2u C      ", temp);
+
+	twi_lcd_msg(buffer_lcd);
+
+	// Segunda fila: punto medio
+	twi_lcd_cmd(0xC0);
+
+	snprintf(buffer_lcd, sizeof(buffer_lcd),
+	"P.Medio: %2u C   ", punto_medio);
+
+	twi_lcd_msg(buffer_lcd);
+}
+
+
+void USART_informar_estado(uint8_t temp, const char *accion)
+{
+	char buffer[64];
+
+	snprintf(buffer, sizeof(buffer),
+	"Temp: %u C | Punto medio: %u C\r\n",
+	temp, punto_medio);
+
+	USART_enviar_texto(buffer);
+
+	snprintf(buffer, sizeof(buffer),
+	"Accion: %s\r\n\r\n", accion);
+
+	USART_enviar_texto(buffer);
+}
+
+
+
+int main(void)
+{
+	uint8_t temperatura;
+	char tecla;
+
+	uint16_t tiempo_ms = 0;
+
+	const char *accion;
+
+	// Inicializar perifericos
+	Hardware_init();
+	USART_init();
+
+	// Inicializar LCD mediante las bibliotecas existentes
+	twi_init();
+	twi_lcd_init();
+
+	// Mensaje inicial
+	twi_lcd_cmd(0x01);
+	_delay_ms(2);
+
+	twi_lcd_cmd(0x80);
+	twi_lcd_msg("Control termico ");
+
+	twi_lcd_cmd(0xC0);
+	twi_lcd_msg("Iniciando...    ");
+
+	USART_enviar_texto(
+	" SISTEMA DE CONTROL TERMICO\r\n"
+	" ATmega328P - AVR-GCC\r\n"
+	"Punto medio inicial: 20 C\r\n"
+	"Presione '+' para aumentar.\r\n"
+	"Presione '-' para disminuir.\r\n"
+	"Medicion cada 5 segundos.\r\n"
+	);
+
+	_delay_ms(1000);
+
+
+
+	while (1)
+	{
+		// Comprobar si se recibio una tecla
+		if (USART_recibir(&tecla))
+		{
+			ajustar_punto_medio(tecla);
+		}
+
+		// Intervalo de 100 ms
+		_delay_ms(100);
+
+		tiempo_ms += 100;
+
+		// Realizar una medicion cada 5 segundos
+		if (tiempo_ms >= INTERVALO_MS)
+		{
+			tiempo_ms = 0;
+
+			// Leer el sensor
+			if (DHT_leer_temperatura(&temperatura))
+			{
+				// Aplicar el control termico
+				accion = control_temperatura(temperatura);
+
+				// Actualizar LCD
+				LCD_actualizar(temperatura);
+
+				// Informar por USART
+				USART_informar_estado(temperatura, accion);
+			}
+			else
+			{
+				// Ante cualquier error de lectura,
+				// apagar las salidas por seguridad.
+
+				salidas_seguras();
+
+				USART_enviar_texto(
+				"\r\n[ERROR] DHT11 sin respuesta "
+				"o checksum incorrecto.\r\n"
+				);
+
+				// Mostrar el error en el LCD
+				twi_lcd_cmd(0x80);
+				twi_lcd_msg("Error sensor    ");
+
+				twi_lcd_cmd(0xC0);
+				twi_lcd_msg("DHT11           ");
+			}
+		}
+	}
+}
+
+
