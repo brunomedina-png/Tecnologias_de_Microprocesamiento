@@ -115,7 +115,82 @@ void lcd_init(void) {
 }
 
 
-// Primera etapa: prueba del LCD, teclado y acceso basico.
+typedef struct { uint8_t uid[4]; char pin[4]; uint16_t saldo; } CuentaBancaria;
+#define TOTAL_CUENTAS 3
+#define EEPROM_MAGIC_ADDR 0x00
+#define EEPROM_MAGIC_VAL 0xC5
+#define EEPROM_BASE_ADDR 0x02
+#define CUENTA_BYTES 10
+
+// Guarda un byte en la EEPROM.
+void EEPROM_write_byte(uint16_t addr, uint8_t data) {
+	while (EECR & (1 << EEPE));
+	EEAR = addr;
+	EEDR = data;
+	EECR |= (1 << EEMPE);
+	EECR |= (1 << EEPE);
+}
+
+// Lee un byte de la EEPROM.
+uint8_t EEPROM_read_byte(uint16_t addr) {
+	while (EECR & (1 << EEPE));
+	EEAR = addr;
+	EECR |= (1 << EERE);
+	return EEDR;
+}
+
+// Guarda un número de dos bytes en la EEPROM.
+void EEPROM_write_word(uint16_t addr, uint16_t data) {
+	EEPROM_write_byte(addr,     (uint8_t)(data & 0xFF));
+	EEPROM_write_byte(addr + 1, (uint8_t)((data >> 8) & 0xFF));
+}
+
+// Lee un número de dos bytes de la EEPROM.
+uint16_t EEPROM_read_word(uint16_t addr) {
+	uint16_t l = EEPROM_read_byte(addr);
+	uint16_t h = EEPROM_read_byte(addr + 1);
+	return (h << 8) | l;
+}
+
+// Carga los datos de una cuenta desde la EEPROM.
+void EEPROM_cargar_cuenta(uint8_t idx, CuentaBancaria *c) {
+	uint16_t base = EEPROM_BASE_ADDR + ((uint16_t)idx * CUENTA_BYTES);
+	for (uint8_t i = 0; i < 4; i++) {
+		c->uid[i] = EEPROM_read_byte(base + i);
+	}
+	for (uint8_t i = 0; i < 4; i++) {
+		c->pin[i] = (char)EEPROM_read_byte(base + 4 + i);
+	}
+	c->saldo = EEPROM_read_word(base + 8);
+}
+
+// Guarda los datos de una cuenta en la EEPROM.
+void EEPROM_guardar_cuenta(uint8_t idx, const CuentaBancaria *c) {
+	uint16_t base = EEPROM_BASE_ADDR + ((uint16_t)idx * CUENTA_BYTES);
+	for (uint8_t i = 0; i < 4; i++) {
+		EEPROM_write_byte(base + i, c->uid[i]);
+	}
+	for (uint8_t i = 0; i < 4; i++) {
+		EEPROM_write_byte(base + 4 + i, (uint8_t)c->pin[i]);
+	}
+	EEPROM_write_word(base + 8, c->saldo);
+}
+
+// Carga las cuentas iniciales si la EEPROM no está inicializada.
+void EEPROM_init_sistema(void) {
+	if (EEPROM_read_byte(EEPROM_MAGIC_ADDR) != EEPROM_MAGIC_VAL) {
+		CuentaBancaria c_def[TOTAL_CUENTAS] = {
+			{{0,0,0,0}, {'1','2','3','4'}, 1000},
+			{{0,0,0,0}, {'1','1','1','1'}, 2500},
+			{{0,0,0,0}, {'0','0','0','0'},  500}
+		};
+
+		for (uint8_t i = 0; i < TOTAL_CUENTAS; i++) {
+			EEPROM_guardar_cuenta(i, &c_def[i]);
+		}
+		EEPROM_write_byte(EEPROM_MAGIC_ADDR, EEPROM_MAGIC_VAL);
+	}
+}
 
 // Distribución de teclas usada en el teclado de Proteus.
 const char TECLAS[4][4] = {
@@ -187,43 +262,65 @@ void feedback_error(void) {
 int main(void) {
     DDRC |= (1 << LED_VERDE) | (1 << LED_ROJO) | (1 << BUZZER);
     PORTC &= ~((1 << LED_VERDE) | (1 << LED_ROJO) | (1 << BUZZER));
-    Keypad_init();
-    lcd_init();
-
-    char pin[5] = {0};
-    uint8_t pos = 0;
-    int8_t cuenta = -1;
-    const char *pines[3] = {"1234", "1111", "0000"};
-    char tecla;
+    Keypad_init(); lcd_init(); EEPROM_init_sistema();
+    char pin_ingresado[5] = {0};
+    uint8_t pin_pos = 0;
+    char buffer[17];
+    int8_t cuenta_activa = -1;
+    uint16_t monto = 0;
+    uint8_t autenticado = 0;
 
     while (1) {
-        if (cuenta < 0) {
-            lcd_set_cursor(0, 0); lcd_msg("Seleccione cuenta");
-            lcd_set_cursor(1, 0); lcd_msg("/ A  X B  - C    ");
-            tecla = Keypad_get_key();
-            if (tecla == '/') cuenta = 0;
-            else if (tecla == 'X') cuenta = 1;
-            else if (tecla == '-') cuenta = 2;
-            if (cuenta >= 0) { pos = 0; memset(pin, 0, sizeof(pin)); lcd_clear(); }
-        } else {
-            lcd_set_cursor(0, 0); lcd_msg("Ingrese PIN:     ");
-            lcd_set_cursor(1, 0);
-            for (uint8_t i = 0; i < 4; i++) lcd_char(i < pos ? '*' : ' ');
+        if (cuenta_activa < 0) {
+            lcd_set_cursor(0,0); lcd_msg("Acerque Tarjeta  ");
+            lcd_set_cursor(1,0); lcd_msg("/ Cuenta1 X2 -3  ");
+            char t = Keypad_get_key();
+            if (t == '/') cuenta_activa = 0;
+            else if (t == 'X') cuenta_activa = 1;
+            else if (t == '-') cuenta_activa = 2;
+            if (cuenta_activa >= 0) { pin_pos=0; memset(pin_ingresado,0,sizeof(pin_ingresado)); autenticado=0; lcd_clear(); }
+        } else if (!autenticado) {
+            lcd_set_cursor(0,0); lcd_msg("Ingrese PIN:     ");
+            lcd_set_cursor(1,0);
+            for (uint8_t i=0;i<4;i++) lcd_char(i<pin_pos?'*':' ');
             lcd_msg("            ");
-            tecla = Keypad_get_key();
-            if (tecla >= '0' && tecla <= '9' && pos < 4) pin[pos++] = tecla;
-            else if (tecla == 'O' && pos > 0) pin[--pos] = '\0';
-            if (pos == 4) {
-                if (strncmp(pin, pines[(uint8_t)cuenta], 4) == 0) {
-                    lcd_clear(); lcd_set_cursor(0,0); lcd_msg("Acceso correcto");
-                    feedback_exito(); _delay_ms(700);
-                } else {
-                    lcd_clear(); lcd_set_cursor(0,0); lcd_msg("PIN incorrecto");
-                    feedback_error(); _delay_ms(700);
-                }
-                cuenta = -1; pos = 0; memset(pin, 0, sizeof(pin)); lcd_clear();
+            char t=Keypad_get_key();
+            if (t>='0' && t<='9' && pin_pos<4) pin_ingresado[pin_pos++]=t;
+            else if (t=='O' && pin_pos>0) pin_ingresado[--pin_pos]='\0';
+            if (pin_pos==4) {
+                CuentaBancaria c; EEPROM_cargar_cuenta((uint8_t)cuenta_activa,&c);
+                if (strncmp(pin_ingresado,c.pin,4)==0) { autenticado=1; feedback_exito(); lcd_clear(); }
+                else { lcd_clear(); lcd_set_cursor(0,0); lcd_msg("PIN incorrecto"); feedback_error(); _delay_ms(600); pin_pos=0; memset(pin_ingresado,0,sizeof(pin_ingresado)); lcd_clear(); }
             }
+        } else {
+            lcd_set_cursor(0,0); lcd_msg("1:Saldo 2:Retiro");
+            lcd_set_cursor(1,0); lcd_msg("3:Deposito +:Salir");
+            char op=Keypad_get_key();
+            if (op=='1') {
+                CuentaBancaria c; EEPROM_cargar_cuenta((uint8_t)cuenta_activa,&c);
+                lcd_clear(); lcd_set_cursor(0,0); snprintf(buffer,sizeof(buffer),"Cuenta %d",cuenta_activa+1); lcd_msg(buffer);
+                lcd_set_cursor(1,0); snprintf(buffer,sizeof(buffer),"Saldo: $%u",c.saldo); lcd_msg(buffer);
+                while (Keypad_get_key()!='O') { }
+                lcd_clear();
+            } else if (op=='2' || op=='3') {
+                uint8_t deposito=(op=='3'); monto=0; lcd_clear();
+                while (1) {
+                    lcd_set_cursor(0,0); lcd_msg(deposito?"Monto deposito  ":"Monto retiro    ");
+                    lcd_set_cursor(1,0); snprintf(buffer,sizeof(buffer),"%u               ",monto); lcd_msg(buffer);
+                    char t=Keypad_get_key();
+                    if (t>='0' && t<='9' && monto<6000) monto=(uint16_t)(monto*10+(t-'0'));
+                    else if (t=='O' || t=='*') { monto=0; break; }
+                    else if (t=='=') {
+                        CuentaBancaria c; EEPROM_cargar_cuenta((uint8_t)cuenta_activa,&c);
+                        if (monto>0 && ((deposito && monto <= (uint16_t)(65535U-c.saldo)) || (!deposito && monto<=c.saldo))) {
+                            if (deposito) c.saldo+=monto; else c.saldo-=monto;
+                            EEPROM_guardar_cuenta((uint8_t)cuenta_activa,&c);
+                            lcd_clear(); lcd_set_cursor(0,0); lcd_msg("Operacion correcta"); feedback_exito();
+                        } else { lcd_clear(); lcd_set_cursor(0,0); lcd_msg("Monto no valido"); feedback_error(); }
+                        _delay_ms(700); lcd_clear(); break;
+                    }
+                }
+            } else if (op=='+' || op=='O') { cuenta_activa=-1; autenticado=0; lcd_clear(); }
         }
     }
 }
-
