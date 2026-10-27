@@ -1,1 +1,238 @@
+#define F_CPU 16000000UL
 
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+#include <stdint.h>
+
+#define DATA_PIN PD6
+#define DATA_PORT PORTD
+#define DATA_DDR DDRD
+
+#define JOY_SW PD4
+#define BUZZER PB3
+
+#define NUM_LEDS 64
+
+#define UMBRAL_BAJO 350
+#define UMBRAL_ALTO 700
+
+#define ROJO 0
+#define VERDE 1
+#define AZUL 2
+#define AMARILLO 3
+#define SIN_COLOR 255
+
+static void sendByte(uint8_t value)
+{
+    for (uint8_t mask = 0x80; mask; mask >>= 1)
+    {
+        if (value & mask)
+        {
+            DATA_PORT |= (1 << DATA_PIN);
+
+            __asm__ __volatile__(
+                "nop\n\t""nop\n\t""nop\n\t""nop\n\t"
+                "nop\n\t""nop\n\t""nop\n\t""nop\n\t"
+                "nop\n\t""nop\n\t""nop\n\t"
+            );
+
+            DATA_PORT &= ~(1 << DATA_PIN);
+
+            __asm__ __volatile__("nop\n\t""nop\n\t");
+        }
+        else
+        {
+            DATA_PORT |= (1 << DATA_PIN);
+
+            __asm__ __volatile__("nop\n\t""nop\n\t");
+
+            DATA_PORT &= ~(1 << DATA_PIN);
+
+            __asm__ __volatile__(
+                "nop\n\t""nop\n\t""nop\n\t""nop\n\t"
+                "nop\n\t""nop\n\t""nop\n\t"
+            );
+        }
+    }
+}
+
+static void sendColor(uint8_t r, uint8_t g, uint8_t b)
+{
+    sendByte(g);
+    sendByte(r);
+    sendByte(b);
+}
+
+static void showColor(uint8_t r, uint8_t g, uint8_t b)
+{
+    uint8_t oldSREG = SREG;
+    cli();
+
+    for (uint8_t i = 0; i < NUM_LEDS; i++)
+    {
+        sendColor(r, g, b);
+    }
+
+    SREG = oldSREG;
+    _delay_us(80);
+}
+
+static void clearMatrix(void)
+{
+    showColor(0, 0, 0);
+}
+
+static void showColorIndex(uint8_t color)
+{
+    switch (color)
+    {
+        case ROJO:
+            showColor(35, 0, 0);
+            break;
+
+        case VERDE:
+            showColor(0, 35, 0);
+            break;
+
+        case AZUL:
+            showColor(0, 0, 35);
+            break;
+
+        case AMARILLO:
+            showColor(35, 20, 0);
+            break;
+
+        default:
+            clearMatrix();
+            break;
+    }
+}
+
+static void adc_init(void)
+{
+    ADMUX = (1 << REFS0);
+
+    ADCSRA = (1 << ADEN)
+           | (1 << ADPS2)
+           | (1 << ADPS1)
+           | (1 << ADPS0);
+}
+
+static uint16_t adc_read(uint8_t canal)
+{
+    ADMUX = (1 << REFS0) | (canal & 0x07);
+
+    ADCSRA |= (1 << ADSC);
+
+    while (ADCSRA & (1 << ADSC))
+    {
+    }
+
+    return ADC;
+}
+
+static uint8_t joystick_read(void)
+{
+    uint16_t x = adc_read(0);
+    uint16_t y = adc_read(1);
+
+    if (x < UMBRAL_BAJO)
+        return ROJO;
+
+    if (x > UMBRAL_ALTO)
+        return VERDE;
+
+    if (y < UMBRAL_BAJO)
+        return AZUL;
+
+    if (y > UMBRAL_ALTO)
+        return AMARILLO;
+
+    return SIN_COLOR;
+}
+
+static uint8_t button_pressed(void)
+{
+    if (!(PIND & (1 << JOY_SW)))
+    {
+        _delay_ms(25);
+
+        if (!(PIND & (1 << JOY_SW)))
+        {
+            while (!(PIND & (1 << JOY_SW)))
+            {
+            }
+
+            _delay_ms(25);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static void buzzer_init(void)
+{
+    DDRB |= (1 << BUZZER);
+    PORTB &= ~(1 << BUZZER);
+}
+
+static void beep(void)
+{
+    for (uint16_t i = 0; i < 100; i++)
+    {
+        PORTB |= (1 << BUZZER);
+        _delay_us(500);
+
+        PORTB &= ~(1 << BUZZER);
+        _delay_us(500);
+    }
+
+    PORTB &= ~(1 << BUZZER);
+}
+
+int main(void)
+{
+    DATA_DDR |= (1 << DATA_PIN);
+    DATA_PORT &= ~(1 << DATA_PIN);
+
+    DDRD &= ~(1 << JOY_SW);
+    PORTD |= (1 << JOY_SW);
+
+    DDRC &= ~((1 << PC0) | (1 << PC1));
+
+    adc_init();
+    buzzer_init();
+
+    clearMatrix();
+
+    while (1)
+    {
+        uint8_t color = joystick_read();
+
+        if (color != SIN_COLOR)
+        {
+            showColorIndex(color);
+
+            if (button_pressed())
+            {
+                beep();
+                clearMatrix();
+
+                while (joystick_read() != SIN_COLOR)
+                {
+                    _delay_ms(20);
+                }
+
+                _delay_ms(100);
+            }
+        }
+        else
+        {
+            clearMatrix();
+        }
+
+        _delay_ms(20);
+    }
+}
