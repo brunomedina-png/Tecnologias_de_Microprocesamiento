@@ -2,8 +2,11 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <avr/eeprom.h>
 #include <util/delay.h>
 #include <stdint.h>
+
+// Configuracion de pines 
 
 #define DATA_PIN PD6
 #define DATA_PORT PORTD
@@ -24,12 +27,17 @@
 #define AMARILLO 3
 #define SIN_COLOR 255
 
+// Variables del juego 
+
 static uint8_t secuencia[MAX_NIVEL];
 static uint8_t nivel;
-
 static uint16_t semilla = 0xACE1;
 
-static void sendByte(uint8_t value)
+uint16_t EEMEM record_guardado;
+
+// Matriz WS2812B 
+
+static inline void sendByte(uint8_t value)
 {
     for (uint8_t mask = 0x80; mask; mask >>= 1)
     {
@@ -76,7 +84,9 @@ static void showColor(uint8_t r, uint8_t g, uint8_t b)
     cli();
 
     for (uint8_t i = 0; i < NUM_LEDS; i++)
+    {
         sendColor(r, g, b);
+    }
 
     SREG = oldSREG;
     _delay_us(80);
@@ -113,6 +123,8 @@ static void showColorIndex(uint8_t color)
     }
 }
 
+// ADC para el joystick
+
 static void adc_init(void)
 {
     ADMUX = (1 << REFS0);
@@ -136,6 +148,8 @@ static uint16_t adc_read(uint8_t canal)
     return ADC;
 }
 
+// Lectura de direccion 
+
 static uint8_t joystick_read(void)
 {
     uint16_t x = adc_read(0);
@@ -155,6 +169,8 @@ static uint8_t joystick_read(void)
 
     return SIN_COLOR;
 }
+
+// Pulsador con antirrebote 
 
 static uint8_t button_pressed(void)
 {
@@ -176,15 +192,25 @@ static uint8_t button_pressed(void)
     return 0;
 }
 
+// Buzzer
+
 static void buzzer_init(void)
 {
     DDRB |= (1 << BUZZER);
     PORTB &= ~(1 << BUZZER);
 }
 
-static void beep(uint16_t medio_periodo_us, uint16_t ciclos)
+static void beep(uint16_t frecuencia, uint16_t duracion_ms)
 {
-    for (uint16_t i = 0; i < ciclos; i++)
+    if (frecuencia == 0)
+        return;
+
+    uint32_t ciclos =
+        ((uint32_t)frecuencia * duracion_ms) / 1000UL;
+
+    uint32_t medio_periodo_us = 500000UL / frecuencia;
+
+    for (uint32_t i = 0; i < ciclos; i++)
     {
         PORTB |= (1 << BUZZER);
 
@@ -202,13 +228,15 @@ static void beep(uint16_t medio_periodo_us, uint16_t ciclos)
 
 static void sonido_correcto(void)
 {
-    beep(500, 80);
+    beep(1000, 80);
 }
 
 static void sonido_error(void)
 {
-    beep(2000, 175);
+    beep(250, 350);
 }
+
+// Generador seudoaleatorio 
 
 static uint16_t random16(void)
 {
@@ -231,13 +259,19 @@ static uint8_t randomColor(void)
     return (uint8_t)(random16() % 4);
 }
 
+// Espera a que el joystick vuelva al centro 
+
 static void esperar_centro(void)
 {
     while (joystick_read() != SIN_COLOR)
+    {
         _delay_ms(20);
+    }
 
     _delay_ms(100);
 }
+
+// Muestra la secuencia actual 
 
 static void mostrar_secuencia(void)
 {
@@ -256,13 +290,17 @@ static void mostrar_secuencia(void)
     _delay_ms(300);
 }
 
+// Espera una seleccion y su confirmacion 
+
 static uint8_t esperar_color(void)
 {
+    uint8_t color;
+
     esperar_centro();
 
     while (1)
     {
-        uint8_t color = joystick_read();
+        color = joystick_read();
 
         if (color != SIN_COLOR)
         {
@@ -284,6 +322,8 @@ static uint8_t esperar_color(void)
     }
 }
 
+// Indicadores de resultado 
+
 static void mostrar_error(void)
 {
     showColorIndex(ROJO);
@@ -300,14 +340,25 @@ static void mostrar_nivel_superado(void)
     _delay_ms(200);
 }
 
+/* Inicio de una partida */
+
 static void iniciar_juego(void)
 {
     nivel = 1;
+
+    // Genera una nueva secuencia para esta partida. 
     secuencia[0] = randomColor();
+
+    // Los niveles siguientes agregaran un color. 
 }
+
+// main
 
 int main(void)
 {
+    uint16_t record;
+    uint16_t puntuacion;
+
     DATA_DDR |= (1 << DATA_PIN);
     DATA_PORT &= ~(1 << DATA_PIN);
 
@@ -319,8 +370,17 @@ int main(void)
     adc_init();
     buzzer_init();
 
+    record = eeprom_read_word(&record_guardado);
+
+    if (record == 0xFFFF || record > MAX_NIVEL)
+    {
+        record = 0;
+        eeprom_update_word(&record_guardado, record);
+    }
+
     clearMatrix();
 
+    // Variacion inicial de la semilla. 
     for (uint8_t i = 0; i < 30; i++)
     {
         semilla ^= adc_read(0);
@@ -331,9 +391,14 @@ int main(void)
     while (1)
     {
         iniciar_juego();
+        puntuacion = 0;
 
         while (nivel <= MAX_NIVEL)
         {
+            
+             //En cada nivel se agrega un solo color.
+             // Los colores anteriores se conservan.
+             
             if (nivel > 1)
                 secuencia[nivel - 1] = randomColor();
 
@@ -357,22 +422,39 @@ int main(void)
             if (!correcto)
             {
                 mostrar_error();
+
+                puntuacion = nivel - 1;
+
+                if (puntuacion > record)
+                {
+                    record = puntuacion;
+                    eeprom_update_word(&record_guardado, record);
+                }
+
                 break;
             }
 
+            puntuacion = nivel;
             mostrar_nivel_superado();
 
             nivel++;
             _delay_ms(300);
         }
 
+        
+         // Fin de partida.
+         // El jugador pulsa el boton para reiniciar.
+         
         clearMatrix();
 
         while (!button_pressed())
+        {
             _delay_ms(20);
+        }
 
         esperar_centro();
 
+        // Mezcla la semilla para la proxima partida. 
         semilla ^= adc_read(0);
         semilla ^= (adc_read(1) << 2);
     }
