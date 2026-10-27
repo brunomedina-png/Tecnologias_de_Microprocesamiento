@@ -13,6 +13,7 @@
 #define BUZZER PB3
 
 #define NUM_LEDS 64
+#define MAX_NIVEL 32
 
 #define UMBRAL_BAJO 350
 #define UMBRAL_ALTO 700
@@ -22,6 +23,11 @@
 #define AZUL 2
 #define AMARILLO 3
 #define SIN_COLOR 255
+
+static uint8_t secuencia[MAX_NIVEL];
+static uint8_t nivel;
+
+static uint16_t semilla = 0xACE1;
 
 static void sendByte(uint8_t value)
 {
@@ -70,9 +76,7 @@ static void showColor(uint8_t r, uint8_t g, uint8_t b)
     cli();
 
     for (uint8_t i = 0; i < NUM_LEDS; i++)
-    {
         sendColor(r, g, b);
-    }
 
     SREG = oldSREG;
     _delay_us(80);
@@ -178,18 +182,128 @@ static void buzzer_init(void)
     PORTB &= ~(1 << BUZZER);
 }
 
-static void beep(void)
+static void beep(uint16_t medio_periodo_us, uint16_t ciclos)
 {
-    for (uint16_t i = 0; i < 100; i++)
+    for (uint16_t i = 0; i < ciclos; i++)
     {
         PORTB |= (1 << BUZZER);
-        _delay_us(500);
+
+        for (uint16_t j = 0; j < medio_periodo_us; j++)
+            _delay_us(1);
 
         PORTB &= ~(1 << BUZZER);
-        _delay_us(500);
+
+        for (uint16_t j = 0; j < medio_periodo_us; j++)
+            _delay_us(1);
     }
 
     PORTB &= ~(1 << BUZZER);
+}
+
+static void sonido_correcto(void)
+{
+    beep(500, 80);
+}
+
+static void sonido_error(void)
+{
+    beep(2000, 175);
+}
+
+static uint16_t random16(void)
+{
+    uint16_t bit =
+        ((semilla >> 0)
+        ^ (semilla >> 2)
+        ^ (semilla >> 3)
+        ^ (semilla >> 5)) & 1;
+
+    semilla = (semilla >> 1) | (bit << 15);
+
+    if (semilla == 0)
+        semilla = 0xACE1;
+
+    return semilla;
+}
+
+static uint8_t randomColor(void)
+{
+    return (uint8_t)(random16() % 4);
+}
+
+static void esperar_centro(void)
+{
+    while (joystick_read() != SIN_COLOR)
+        _delay_ms(20);
+
+    _delay_ms(100);
+}
+
+static void mostrar_secuencia(void)
+{
+    clearMatrix();
+    _delay_ms(400);
+
+    for (uint8_t i = 0; i < nivel; i++)
+    {
+        showColorIndex(secuencia[i]);
+        _delay_ms(550);
+
+        clearMatrix();
+        _delay_ms(300);
+    }
+
+    _delay_ms(300);
+}
+
+static uint8_t esperar_color(void)
+{
+    esperar_centro();
+
+    while (1)
+    {
+        uint8_t color = joystick_read();
+
+        if (color != SIN_COLOR)
+        {
+            showColorIndex(color);
+
+            if (button_pressed())
+            {
+                clearMatrix();
+                esperar_centro();
+                return color;
+            }
+        }
+        else
+        {
+            clearMatrix();
+        }
+
+        _delay_ms(20);
+    }
+}
+
+static void mostrar_error(void)
+{
+    showColorIndex(ROJO);
+    sonido_error();
+    _delay_ms(300);
+    clearMatrix();
+}
+
+static void mostrar_nivel_superado(void)
+{
+    showColorIndex(VERDE);
+    sonido_correcto();
+    clearMatrix();
+    _delay_ms(200);
+}
+
+static void iniciar_juego(void)
+{
+    nivel = 1;
+    secuencia[0] = randomColor();
 }
 
 int main(void)
@@ -207,32 +321,59 @@ int main(void)
 
     clearMatrix();
 
+    for (uint8_t i = 0; i < 30; i++)
+    {
+        semilla ^= adc_read(0);
+        semilla ^= (adc_read(1) << 1);
+        _delay_ms(10);
+    }
+
     while (1)
     {
-        uint8_t color = joystick_read();
+        iniciar_juego();
 
-        if (color != SIN_COLOR)
+        while (nivel <= MAX_NIVEL)
         {
-            showColorIndex(color);
+            if (nivel > 1)
+                secuencia[nivel - 1] = randomColor();
 
-            if (button_pressed())
+            mostrar_secuencia();
+
+            uint8_t correcto = 1;
+
+            for (uint8_t i = 0; i < nivel; i++)
             {
-                beep();
-                clearMatrix();
+                uint8_t respuesta = esperar_color();
 
-                while (joystick_read() != SIN_COLOR)
+                if (respuesta != secuencia[i])
                 {
-                    _delay_ms(20);
+                    correcto = 0;
+                    break;
                 }
 
-                _delay_ms(100);
+                sonido_correcto();
             }
-        }
-        else
-        {
-            clearMatrix();
+
+            if (!correcto)
+            {
+                mostrar_error();
+                break;
+            }
+
+            mostrar_nivel_superado();
+
+            nivel++;
+            _delay_ms(300);
         }
 
-        _delay_ms(20);
+        clearMatrix();
+
+        while (!button_pressed())
+            _delay_ms(20);
+
+        esperar_centro();
+
+        semilla ^= adc_read(0);
+        semilla ^= (adc_read(1) << 2);
     }
 }
