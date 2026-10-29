@@ -1,0 +1,301 @@
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <string.h>
+
+#define DESARMADO   0
+#define ARMADO      1
+#define ALARMA      2
+#define SILENCIADA  3
+
+#define AUTO    0
+#define MANUAL  1
+
+#define NINGUNA     0
+#define VENTANA     1
+#define MOVIMIENTO  2
+#define ZONA_MANUAL 3
+
+#define UMBRAL_LDR 600
+
+#define USAR_BOTON 1
+
+int estado = DESARMADO;
+int modo = AUTO;
+int zona = NINGUNA;
+int avisado = 0;
+
+char cmd[16];
+volatile int n = 0;
+volatile int comando_listo = 0;
+volatile int tick = 0;
+
+int cont_ldr = 0;
+int cont_pir = 0;
+int cont_sirena = 0;
+int cont_reporte = 0;
+int sirena_on = 0;
+
+void uart_init(void)
+{
+	UBRR0H = 0;
+	UBRR0L = 103;
+	UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);
+	UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+
+void timer0_init(void)
+{
+	TCCR0A = (1 << WGM01);
+	OCR0A = 249;
+	TCCR0B = (1 << CS01) | (1 << CS00);
+	TIMSK0 = (1 << OCIE0A);
+}
+
+ISR(TIMER0_COMPA_vect)
+{
+	tick = 1;
+}
+
+void uart_enviar_char(char c)
+{
+	while (!(UCSR0A & (1 << UDRE0)));
+	UDR0 = c;
+}
+
+void uart_enviar(const char *texto)
+{
+	int i = 0;
+	while (texto[i] != '\0') {
+		uart_enviar_char(texto[i]);
+		i++;
+	}
+}
+
+void uart_linea(const char *texto)
+{
+	uart_enviar(texto);
+	uart_enviar("\r\n");
+}
+
+void adc_init(void)
+{
+	ADMUX = (1 << REFS0);
+	ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+}
+
+unsigned int leer_ldr(void)
+{
+	ADMUX = (1 << REFS0);
+	ADCSRA |= (1 << ADSC);
+	while (ADCSRA & (1 << ADSC));
+	return ADC;
+}
+
+void enviar_estado(void)
+{
+	uart_enviar("ESTADO:");
+	if (estado == DESARMADO)  uart_enviar("DESARMADO");
+	if (estado == ARMADO)     uart_enviar("ARMADO");
+	if (estado == ALARMA)     uart_enviar("ALARMA");
+	if (estado == SILENCIADA) uart_enviar("SILENCIADA");
+
+	uart_enviar(";MODO:");
+	if (modo == AUTO) uart_enviar("AUTO");
+	else              uart_enviar("MANUAL");
+
+	uart_enviar(";ALARMA:");
+	if (estado == ALARMA) uart_enviar("ON");
+	else uart_enviar("OFF");
+
+	uart_enviar(";ZONA:");
+	if (zona == NINGUNA)     uart_linea("NINGUNA");
+	if (zona == VENTANA)     uart_linea("VENTANA");
+	if (zona == MOVIMIENTO)  uart_linea("MOVIMIENTO");
+	if (zona == ZONA_MANUAL) uart_linea("MANUAL");
+}
+
+void activar_alarma(int z)
+{
+	estado = ALARMA;
+	zona = z;
+	uart_enviar("ALARMA:ON;ZONA:");
+	if (z == VENTANA)     uart_linea("VENTANA");
+	if (z == MOVIMIENTO)  uart_linea("MOVIMIENTO");
+	if (z == ZONA_MANUAL) uart_linea("MANUAL");
+}
+
+void procesar_comando(void)
+{
+	if (strcmp(cmd, "ARMAR") == 0) {
+		if (estado == DESARMADO || estado == SILENCIADA) {
+			estado = ARMADO;
+			zona = NINGUNA;
+			avisado = 0;
+			uart_linea("ARMAR");
+			enviar_estado();
+			} else {
+			uart_linea("ERR:ESTADO");
+		}
+	}
+	else if (strcmp(cmd, "DESARMAR") == 0) {
+		if (estado == ALARMA) {
+			uart_linea("ALARMA:OFF");
+		}
+		estado = DESARMADO;
+		zona = NINGUNA;
+		avisado = 0;
+		uart_linea("DESARMAR");
+		enviar_estado();
+	}
+	else if (strcmp(cmd, "SILENCIAR") == 0) {
+		if (estado == ALARMA) {
+			estado = SILENCIADA;
+			uart_linea("ALARMA:OFF");
+			uart_linea("SILENCIAR");
+			enviar_estado();
+			} else {
+			uart_linea("SIN_ALARMA");
+		}
+	}
+	else if (strcmp(cmd, "AUTO") == 0) {
+		modo = AUTO;
+		uart_linea("AUTO");
+		enviar_estado();
+	}
+	else if (strcmp(cmd, "MANUAL") == 0) {
+		modo = MANUAL;
+		uart_linea("MANUAL");
+		enviar_estado();
+	}
+	else if (strcmp(cmd, "FORZAR") == 0) {
+		if (modo == MANUAL) {
+			activar_alarma(ZONA_MANUAL);
+			uart_linea("FORZAR");
+			} else {
+			uart_linea("SOLO_MANUAL");
+		}
+	}
+	else if (strcmp(cmd, "ESTADO") == 0) {
+		enviar_estado();
+	}
+	else {
+		uart_linea("COMANDO");
+	}
+}
+
+ISR(USART_RX_vect)
+{
+	char c = UDR0;
+	if (comando_listo == 1) {
+		return;
+	}
+
+	if (c == '\n' || c == '\r') {
+		if (n > 0) {
+			cmd[n] = '\0';
+			n = 0;
+			comando_listo = 1;
+		}
+		} else {
+		if (c >= 'a' && c <= 'z') {
+			c = c - 32;
+		}
+		if (n < 15) {
+			cmd[n] = c;
+			n++;
+		}
+	}
+}
+
+void revisar_sensores(void)
+{
+	int ev = NINGUNA;
+
+	if (leer_ldr() > UMBRAL_LDR) cont_ldr++;
+	else cont_ldr = 0;
+
+	#if USAR_BOTON
+	if (!(PIND & (1 << PD2))) cont_pir++;
+	else cont_pir = 0;
+	#else
+	if (PIND & (1 << PD2)) cont_pir++;
+	else cont_pir = 0;
+	#endif
+
+	if (cont_ldr >= 50) ev = VENTANA;
+	else if (cont_pir >= 50) ev = MOVIMIENTO;
+
+	if (estado == ARMADO && ev != NINGUNA) {
+		if (modo == AUTO) {
+			activar_alarma(ev);
+			} else if (avisado == 0) {
+			avisado = 1;
+			zona = ev;
+			uart_enviar("EVENTO:ZONA:");
+			if (ev == VENTANA) uart_enviar("VENTANA");
+			else uart_enviar("MOVIMIENTO");
+			uart_linea(";ESPERA_OPERADOR");
+		}
+	}
+}
+
+void actualizar_salidas(void)
+{
+	if (estado == DESARMADO) PORTB &= ~(1 << PB2);
+	else PORTB |= (1 << PB2);
+
+	if (estado == ALARMA) {
+		cont_sirena++;
+		if (cont_sirena >= 250) {
+			cont_sirena = 0;
+			sirena_on = !sirena_on;
+		}
+		if (sirena_on) PORTB |= (1 << PB0) | (1 << PB1);
+		else PORTB &= ~((1 << PB0) | (1 << PB1));
+	}
+	else if (estado == SILENCIADA) {
+		PORTB |= (1 << PB1);
+		PORTB &= ~(1 << PB0);
+	}
+	else {
+		PORTB &= ~((1 << PB0) | (1 << PB1));
+		cont_sirena = 0;
+	}
+}
+
+int main(void)
+{
+	DDRB |= (1 << PB0) | (1 << PB1) | (1 << PB2);
+	DDRD &= ~(1 << PD2);
+	#if USAR_BOTON
+	PORTD |= (1 << PD2);
+	#endif
+
+	uart_init();
+	adc_init();
+	timer0_init();
+	sei();
+
+	uart_linea("SISTEMA ALARMA LISTO");
+	enviar_estado();
+
+	while (1) {
+		if (comando_listo == 1) {
+			procesar_comando();
+			comando_listo = 0;
+		}
+
+		if (tick == 1) {
+			tick = 0;
+			revisar_sensores();
+			actualizar_salidas();
+
+			cont_reporte++;
+			if (cont_reporte >= 5000) {
+				cont_reporte = 0;
+				enviar_estado();
+			}
+		}
+	}
+}
